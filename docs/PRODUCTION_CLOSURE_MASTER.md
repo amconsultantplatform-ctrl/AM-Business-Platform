@@ -43,7 +43,7 @@ production gate; the supplemental workflow
 | Browser acceptance | PASS | `npm run test:first-run-browser`, `npm run test:browser-acceptance` |
 | Deep-link reload persistence | UNVERIFIED | URL-backed state is implemented; fresh onboarding fixture still requires a dedicated completed-onboarding reload fixture |
 | Dependency security | PASS | `npm audit --audit-level=high` reports 0 vulnerabilities |
-| Deployment CI execution | UNVERIFIED | Workflow is committed; target GitHub execution is not evidenced in this audit |
+| Deployment CI execution | PASS | GitHub `Production Certification` and `Production Closure Gate` passed for commit `3a26719bd9b4f2025881b06681a7d7d9a1819f60` |
 
 ## Important current audit observations
 
@@ -81,8 +81,8 @@ browser fixture.
 ## Final status
 
 The repository is **not marked `PRODUCTION CLOSED`**. The two unavailable P0
-proofs, direct deep-link reload evidence, deployment-side CI execution, and
-target-environment operational sign-off remain outstanding.
+proofs, direct deep-link reload evidence, and target-environment operational
+sign-off remain outstanding.
 
 ## Final deliverables
 

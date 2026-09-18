@@ -46,6 +46,7 @@ checksum rejection for a tampered backup without replacing current data.
 
 Repository-level gates and negative paths passed except for the explicitly
 unverified direct deep-link reload proof and the two P0 boundary proofs
-reported as `NOT AVAILABLE`. Deployment-side CI execution and target-environment
-sign-off also remain external operational actions; this report does not claim
-those actions occurred.
+reported as `NOT AVAILABLE`. GitHub `Production Certification` and
+`Production Closure Gate` also passed for the final commit. Target-environment
+operational sign-off remains an external operational action; this report does
+not claim that sign-off occurred.
