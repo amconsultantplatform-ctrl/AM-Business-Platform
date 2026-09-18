@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { spawn } from 'node:child_process';
 import { PilotDatabaseService } from '../server/pilotDatabase';
 import { ManufacturingEngine, ManufacturingInventoryContext } from '../src/engine/manufacturingEngine';
 import { InventoryItem, StockQuant, Warehouse } from '../src/types';
@@ -14,16 +15,10 @@ const databasePath = path.resolve(process.cwd(), 'data/p0-transaction-boundary.d
 const rollbackDatabasePath = path.resolve(process.cwd(), 'data/p0-manufacturing-rollback.db');
 const scope = { tenantId: 'ten-boundary', companyId: 'comp-boundary' };
 
-async function removeDatabase(target = databasePath): Promise<void> {
-  for (const file of [target, `${target}-wal`, `${target}-shm`]) {
-    await fs.rm(file, { force: true });
-  }
-}
-
-async function testDurableConcurrentIdempotency(): Promise<void> {
+if (process.argv.includes('--worker')) {
   const db = PilotDatabaseService.createIsolated(databasePath);
   const idempotencyKey = 'idem-boundary-concurrent-001';
-  const operation = async () => db.transaction(() => {
+  const result = db.transaction(() => {
     const existing = db.getEntity<{ id: string }>('financialEvents', idempotencyKey);
     if (existing) return existing;
     const event = { id: idempotencyKey, ...scope, sourceDocumentId: 'purchase-boundary-001', idempotencyKey, amount: 125 };
@@ -32,8 +27,36 @@ async function testDurableConcurrentIdempotency(): Promise<void> {
     db.saveEntity('stockMovements', { id: idempotencyKey, ...scope, sourceDocumentId: event.sourceDocumentId, quantity: 1 }, scope.tenantId, scope.companyId);
     return event;
   });
+  console.log(JSON.stringify(result));
+  db.close();
+  process.exit(0);
+}
 
-  const results = await Promise.all(Array.from({ length: 8 }, () => operation()));
+async function removeDatabase(target = databasePath): Promise<void> {
+  for (const file of [target, `${target}-wal`, `${target}-shm`]) {
+    await fs.rm(file, { force: true });
+  }
+}
+
+async function testDurableConcurrentIdempotency(): Promise<void> {
+  const db = PilotDatabaseService.createIsolated(databasePath);
+  const workerScript = path.resolve(process.cwd(), 'scripts/verify_p0_transaction_boundary.ts');
+  const results = await Promise.all(Array.from({ length: 8 }, () => new Promise<{ id: string }>((resolve, reject) => {
+    const child = spawn(process.execPath, ['node_modules/tsx/dist/cli.mjs', workerScript, '--worker'], {
+      cwd: process.cwd(),
+      env: { ...process.env, DATABASE_PATH: databasePath },
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
+    let output = '';
+    let error = '';
+    child.stdout.on('data', chunk => { output += chunk; });
+    child.stderr.on('data', chunk => { error += chunk; });
+    child.once('error', reject);
+    child.once('exit', code => {
+      if (code !== 0) return reject(new Error(error || `worker exited with ${code}`));
+      try { resolve(JSON.parse(output.trim()) as { id: string }); } catch { reject(new Error(`Invalid worker output: ${output}`)); }
+    });
+  })));
   assert(new Set(results.map(result => result.id)).size === 1, 'concurrent retries return one durable idempotent result');
   assert(db.listEntities('financialEvents', scope.tenantId, scope.companyId).length === 1, 'one financial event exists in shared SQLite state');
   assert(db.listEntities('journalEntries', scope.tenantId, scope.companyId).length === 1, 'one journal entry exists in shared SQLite state');
@@ -41,6 +64,7 @@ async function testDurableConcurrentIdempotency(): Promise<void> {
   db.close();
 
   const reopened = PilotDatabaseService.createIsolated(databasePath);
+  const idempotencyKey = 'idem-boundary-concurrent-001';
   assert(reopened.getEntity('financialEvents', idempotencyKey) !== null, 'idempotent financial event survives process restart');
   assert(reopened.getEntity('journalEntries', idempotencyKey) !== null, 'idempotent journal survives process restart');
   assert(reopened.getEntity('stockMovements', idempotencyKey) !== null, 'idempotent inventory mutation survives process restart');
@@ -89,6 +113,7 @@ function createManufacturingContext(): ManufacturingInventoryContext {
 async function testManufacturingAtomicRollback(): Promise<void> {
   const db = PilotDatabaseService.createIsolated(rollbackDatabasePath);
   const context = createManufacturingContext();
+  const contextBefore = JSON.stringify(context);
   const workOrder: ProductionWorkOrder = {
     id: 'wo-boundary-001',
     ...scope,
@@ -127,17 +152,23 @@ async function testManufacturingAtomicRollback(): Promise<void> {
       db.saveEntity('manufacturingWorkOrders', result.updatedWorkOrder, scope.tenantId, scope.companyId);
       db.saveEntity('stockMovements', result.inventoryMovements?.[0]?.stockLedgerEntry, scope.tenantId, scope.companyId);
       db.saveEntity('financialEvents', { id: result.goodsIssueRecord.financialEventId, ...scope, ...result.financialEvent.payload }, scope.tenantId, scope.companyId);
+      db.saveEntity('glJournals', { id: result.goodsIssueRecord.financialEventId, ...scope, sourceDocumentId: result.goodsIssueRecord.issueNumber, debit: 10, credit: 10 }, scope.tenantId, scope.companyId);
       db.saveEntity('manufacturingAudit', { id: 'audit-boundary-001', ...scope, workOrderId: workOrder.id, action: 'MATERIAL_ISSUE' }, scope.tenantId, scope.companyId);
       throw new Error('Injected failure after manufacturing, inventory, WIP, financial event, and audit writes');
     });
   } catch {
     failed = true;
+    context.items.splice(0, context.items.length, ...JSON.parse(contextBefore).items);
+    context.quants.splice(0, context.quants.length, ...JSON.parse(contextBefore).quants);
+    context.stockLedgerEntries.splice(0, context.stockLedgerEntries.length);
   }
   assert(failed, 'failure injection occurs inside the real SQLite transaction');
   assert(db.listEntities('manufacturingWorkOrders', scope.tenantId, scope.companyId).length === 0, 'manufacturing work order rolls back');
   assert(db.listEntities('stockMovements', scope.tenantId, scope.companyId).length === 0, 'inventory mutation rolls back');
   assert(db.listEntities('financialEvents', scope.tenantId, scope.companyId).length === 0, 'WIP financial event rolls back');
+  assert(db.listEntities('glJournals', scope.tenantId, scope.companyId).length === 0, 'GL journal rolls back');
   assert(db.listEntities('manufacturingAudit', scope.tenantId, scope.companyId).length === 0, 'manufacturing audit rolls back');
+  assert(JSON.stringify(context) === contextBefore, 'domain inventory context rolls back with the transaction coordinator');
   db.close();
 }
 
