@@ -21,6 +21,7 @@
     "test:commercial-e2e": "tsx scripts/verify_commercial_e2e.ts",
     "test:browser-acceptance": "tsx scripts/verify_browser_acceptance.ts",
     "test:first-run-browser": "tsx scripts/verify_first_run_browser.ts",
+    "test:deep-link-reload-browser": "tsx scripts/verify_deep_link_reload_browser.ts",
     "test:first-run": "tsx scripts/verify_first_run_setup.ts",
     "test:production-first-run-closure": "tsx scripts/verify_production_first_run_closure.ts",
     "test:production-equivalent-certification": "tsx scripts/verify_production_equivalent_certification.ts",
