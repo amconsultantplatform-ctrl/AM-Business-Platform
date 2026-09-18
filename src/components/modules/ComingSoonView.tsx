@@ -40,7 +40,7 @@ const moduleMetaMap: Partial<Record<ModuleView, ModuleMeta>> = {
     descriptionAr: 'قوائم المواد متعددة المستويات (BOM)، توجيه أوامر العمل، تنفيذ أجزاء ورش العمل، والتخطيط للطلبات في الوقت الفعلي.',
     featuresEn: ['Multi-level Bill of Materials (BOM)', 'Work Order Routing & Costing', 'Machine & Work Center Capacity', 'Standard vs Actual Cost Variance'],
     featuresAr: ['قوائم المواد متعددة المستويات', 'توجيه وتكلفة أوامر العمل', 'سعة الماكينات ومراكز العمل', 'تحليل انحراف التكلفة المعيارية والفعلية'],
-    iconBg: 'from-amber-500 to-orange-600'
+    iconBg: 'from-brand-gold to-brand-gold-muted'
   },
   pos: {
     titleEn: 'Point of Sale (POS) & Retail Engine',

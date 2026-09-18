@@ -29,7 +29,8 @@
     "test:final-full-system-certification": "tsx scripts/verify_final_full_system_certification_runner.ts",
     "seed:commercial": "tsx scripts/seed_commercial_test.ts",
     "test:p006": "tsx scripts/verify_p0_06_vertical_runtime.ts",
-    "test:p007": "tsx scripts/verify_p0_07_onboarding_wizard.ts"
+    "test:p007": "tsx scripts/verify_p0_07_onboarding_wizard.ts",
+    "test:backup-restore": "tsx scripts/verify_backup_restore.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

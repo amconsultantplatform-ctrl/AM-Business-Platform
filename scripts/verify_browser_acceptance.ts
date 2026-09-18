@@ -3,7 +3,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-const port = 3344;
+const port = Number(process.env.BROWSER_ACCEPTANCE_PORT || 3359);
 const baseUrl = `http://127.0.0.1:${port}`;
 const databasePath = path.resolve(process.cwd(), 'data/browser-acceptance.db');
 const evidenceDir = path.resolve(process.cwd(), 'data/browser-acceptance');
@@ -61,7 +61,8 @@ async function login(): Promise<string> {
 async function waitForShell(page: Page): Promise<void> {
   await page.waitForFunction(() => {
     const text = document.body.innerText;
-    return !text.includes('Querying SQLite onboarding status') && !text.includes('التحقق من سجلات المنشأة');
+    return !text.includes('Querying SQLite onboarding status') &&
+      !text.includes('التحقق من سجلات المنشأة');
   }, undefined, { timeout: 20_000 });
   await page.waitForTimeout(500);
 }
@@ -171,7 +172,8 @@ async function main(): Promise<void> {
       INITIAL_ADMIN_PASSWORD: adminPassword,
       INITIAL_CASHIER_PIN: '1234'
     },
-    stdio: ['ignore', 'pipe', 'pipe']
+    stdio: ['ignore', 'pipe', 'pipe'],
+    detached: true
   });
 
   let browser: Browser | undefined;
@@ -191,7 +193,13 @@ async function main(): Promise<void> {
     console.log(`PASS: browser acceptance completed for ${viewports.length} viewports, both RTL/LTR languages; evidence=${evidenceDir}`);
   } finally {
     await browser?.close();
-    server.kill();
+    if (server.pid) {
+      try {
+        process.kill(-server.pid, 'SIGTERM');
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
+      }
+    }
   }
 }
 

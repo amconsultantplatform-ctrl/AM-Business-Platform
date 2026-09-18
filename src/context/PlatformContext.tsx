@@ -44,6 +44,21 @@ export type ModuleView =
   | 'onboarding_wizard'
   | 'branding';
 
+const moduleViews = new Set<ModuleView>([
+  'dashboard', 'core', 'accounting', 'inventory', 'sales', 'purchasing', 'crm', 'hr', 'ai',
+  'banking', 'manufacturing', 'pos', 'projects', 'fixed_assets', 'bi_analytics', 'reports',
+  'workflows', 'documents', 'master_data', 'settings', 'users_security', 'audit_center',
+  'configuration_center', 'platform_readiness', 'maintenance', 'rental', 'fleet',
+  'service_management', 'quality_management', 'production_planning', 'ecommerce',
+  'onboarding_wizard', 'branding'
+]);
+
+function moduleFromLocation(): ModuleView {
+  if (typeof window === 'undefined') return 'dashboard';
+  const requested = new URLSearchParams(window.location.search).get('module');
+  return requested && moduleViews.has(requested as ModuleView) ? requested as ModuleView : 'dashboard';
+}
+
 interface PlatformContextType {
   lang: Language;
   dir: 'rtl' | 'ltr';
@@ -145,7 +160,7 @@ const PlatformContext = createContext<PlatformContextType | undefined>(undefined
 export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [lang, setLangState] = useState<Language>('en');
   const [theme, setTheme] = useState<Theme>('light');
-  const [activeModule, setActiveModuleState] = useState<ModuleView>('dashboard');
+  const [activeModule, setActiveModuleState] = useState<ModuleView>(moduleFromLocation);
 
   const [tenants, setTenants] = useState<Tenant[]>([]);
   const [activeTenant, setActiveTenantState] = useState<Tenant | null>(null);
@@ -172,6 +187,23 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   } | null>(null);
 
   const activeCompanyIdRef = useRef<string | null>(null);
+  const requestedModuleRef = useRef<ModuleView>(moduleFromLocation());
+
+  useEffect(() => {
+    const handlePopState = () => setActiveModuleState(moduleFromLocation());
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (activeModule === 'dashboard') {
+      url.searchParams.delete('module');
+    } else {
+      url.searchParams.set('module', activeModule);
+    }
+    window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+  }, [activeModule]);
 
   // Tenant Identity & Branding Runtime (P0-08)
   const [branding, setBranding] = useState<TenantBranding | null>(null);
@@ -334,7 +366,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         if (!isCompleted) {
           setActiveModuleState('onboarding_wizard');
         } else {
-          setActiveModuleState(prev => prev === 'onboarding_wizard' ? 'dashboard' : prev);
+          setActiveModuleState(prev => prev === 'onboarding_wizard' ? requestedModuleRef.current : prev);
         }
       }
     } catch (err: any) {
@@ -607,7 +639,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           if (!isDone) {
             setActiveModuleState('onboarding_wizard');
           } else {
-            setActiveModuleState('dashboard');
+            setActiveModuleState(requestedModuleRef.current);
           }
 
           setPlatformInitError(null);

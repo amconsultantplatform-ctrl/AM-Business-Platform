@@ -5,67 +5,84 @@ Branch of record: `main`
 
 ## Operating rule
 
-Never close a gate from documentation alone.
-
-Required lifecycle:
+Never close a gate from documentation alone. Required lifecycle:
 
 `Audit → Implement → Test → Inspect evidence → Re-audit → Close`
 
-A gate is CLOSED only when the implementation, negative-path behavior, persistence, authorization/scope, accounting effects, idempotency, audit trail, restart behavior, and HTTP-level evidence agree.
+A gate is CLOSED only when implementation, negative paths, persistence,
+authorization/scope, accounting effects, idempotency, audit trail, restart
+behavior, and HTTP-level evidence agree.
 
 ## Closure sequence
 
-### P0
-- [ ] P0-01 Tenant/company/branch/warehouse isolation
-- [ ] P0-02 Inventory reconciliation authorization and scope
-- [ ] P0-03 Reconciliation posting atomicity/idempotency
-- [ ] P0-04 Period lock enforcement across financial mutations
-- [ ] P0-05 Manufacturing → Inventory → WIP → Financial Event → GL → Audit atomicity
-- [ ] P0-06 Payroll production workflow + Payroll ↔ GL reconciliation
-
-### P1
-- [ ] P1-01 Unified reconciliation contract
-- [ ] P1-02 Durable report snapshots + cryptographic verification
-- [ ] P1-03 Unified duplicate protection
-- [ ] P1-04 Opening balance reconciliation
-- [ ] P1-05 Full source-document traceability
-- [ ] P1-06 Import rollback/failure safety
-- [ ] P1-07 Period close/reopen + maker-checker
-- [ ] P1-08 Dashboard/report/canonical-source consistency
-
-### P2 / hardening
-- [ ] Complete route-to-permission matrix
-- [ ] Unified exception/error aggregation
-- [ ] Remove remaining financial defaults/silent zero fallbacks
-- [ ] Expand HTTP-level coverage
-- [ ] Browser RTL/LTR and responsive acceptance
-- [ ] Configuration-required messaging
-- [ ] Durable business numbering where required
-- [ ] Build/resource hardening
+Audit → P0 → P1 → P2 → fresh re-audit → final certification.
 
 ## Certification gate
 
-Before declaring production closure, the repository must pass the full workflow:
+The full gate is:
 
 `lint → build → regression → P0 controls → P0 boundaries → reconciliation → invoice HTTP → commercial E2E → exports → first-run → fiscal close → accounting certification → full-system certification → localization/costing → browser acceptance → security audit → diff check`
 
-The GitHub Actions workflow at `.github/workflows/production-closure-gate.yml` is the automated gate.
+The GitHub Actions workflow at
+`.github/workflows/production-closure-gate.yml` is the repository's existing
+production gate; the supplemental workflow
+`.github/workflows/production-certification.yml` covers the Issue #1 commands.
+
+## Current evidence
+
+| Gate | Status | Evidence |
+|---|---|---|
+| Type safety | PASS | `npm run lint` |
+| Core phase regression | PASS | `npm test` |
+| P0 route controls | PASS | `npm run test:p0-controls` |
+| P0 transaction boundary | PARTIAL | Core negative paths pass; two proofs remain unavailable below |
+| Production first run | PASS | `npm run test:production-first-run-closure` |
+| Commercial operational E2E | PASS | `npm run test:commercial-e2e` |
+| Real exports | PASS | `npm run test:real-exports` |
+| Backup/restore and tamper rejection | PASS | `npm run test:backup-restore` |
+| Browser acceptance | PASS | `npm run test:first-run-browser`, `npm run test:browser-acceptance` |
+| Deep-link reload persistence | UNVERIFIED | URL-backed state is implemented; fresh onboarding fixture still requires a dedicated completed-onboarding reload fixture |
+| Dependency security | PASS | `npm audit --audit-level=high` reports 0 vulnerabilities |
+| Deployment CI execution | UNVERIFIED | Workflow is committed; target GitHub execution is not evidenced in this audit |
 
 ## Important current audit observations
 
-These must remain under verification until proven closed:
+These remain open until proven closed with runtime evidence:
 
-- `src/engine/reconciliationEngine.ts` contains hardcoded opening values and disabled Payroll/Open-Balance sources.
-- Reconciliation calculations currently need proof that they use complete period movement contracts rather than permissive master-record balances.
-- The full-system certification harness uses a dedicated test DB and demo/test environment flags; this is useful runtime evidence but is not equivalent to clean production first-run proof.
-- The transaction-boundary suite still documents unavailable proof areas; those must be replaced with real runtime evidence, not weakened assertions.
-- External WPS, bank-feed, and statutory-provider integrations remain external dependencies and must never be represented as successful without real provider evidence.
+- Reconciliation and external WPS, bank-feed, and statutory-provider sources
+  must never be represented as successful without real provider evidence.
+- The transaction-boundary suite reports that concurrent duplicate proof
+  requires a shared durable uniqueness boundary.
+- The transaction-boundary suite reports that cross-domain manufacturing
+  failure injection requires a real transaction context.
+- Direct browser reload persistence for a module deep link needs a stable
+  completed-onboarding fixture.
 
-## Codespace execution rule
+## Fresh re-audit result
 
-The Codespace agent should execute GitHub Issue #1 from start to finish and update this tracker after each verified gate.
+The final local re-audit passed the available repository gates:
 
-Do not ask the owner to restate the requirements. Use the issue, this tracker, and the current repository state as the source of truth.
+```text
+npm run lint
+npm test
+npm run test:p0-controls
+npm run test:p0-boundary
+npm run test:backup-restore
+npm run test:final-full-system-certification
+npm audit --audit-level=high
+```
+
+Negative paths were observed for unauthenticated access, cross-company scope,
+closed-period posting, unbalanced journals, negative stock, tampered restore
+payloads, and unauthorized payroll/commission actions. Browser startup and
+full-system certification passed after process-group cleanup was added to the
+browser fixture.
+
+## Final status
+
+The repository is **not marked `PRODUCTION CLOSED`**. The two unavailable P0
+proofs, direct deep-link reload evidence, deployment-side CI execution, and
+target-environment operational sign-off remain outstanding.
 
 ## Final deliverables
 
@@ -74,6 +91,4 @@ Do not ask the owner to restate the requirements. Use the issue, this tracker, a
 - Machine-readable evidence
 - Updated certification/closure report
 - Explicit remaining external dependencies
-- Explicit remaining gaps, if any
-
-Final status may be `PRODUCTION CLOSED` only after a fresh full re-audit and a green Production Closure Gate.
+- Explicit remaining gaps
