@@ -2,12 +2,30 @@ import { chromium } from 'playwright';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { spawn, type ChildProcess } from 'node:child_process';
+import net from 'node:net';
 
-const port = Number(process.env.FIRST_RUN_BROWSER_PORT || (3361 + (process.pid % 1000)));
-const baseUrl = `http://127.0.0.1:${port}`;
 const databasePath = path.resolve(process.cwd(), 'data/first-run-browser.db');
 const evidencePath = path.resolve(process.cwd(), 'data/browser-acceptance/first-run-welcome.png');
 let server: ChildProcess | undefined;
+let port: number;
+let baseUrl: string;
+
+async function findAvailablePort(): Promise<number> {
+  if (process.env.FIRST_RUN_BROWSER_PORT) return Number(process.env.FIRST_RUN_BROWSER_PORT);
+  return await new Promise((resolve, reject) => {
+    const probe = net.createServer();
+    probe.once('error', reject);
+    probe.listen(0, '127.0.0.1', () => {
+      const address = probe.address();
+      if (!address || typeof address === 'string') {
+        probe.close();
+        reject(new Error('Unable to determine an available browser test port'));
+        return;
+      }
+      probe.close(error => error ? reject(error) : resolve(address.port));
+    });
+  });
+}
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(`FAIL: ${message}`);
@@ -15,6 +33,8 @@ function assert(condition: unknown, message: string): asserts condition {
 }
 
 async function main(): Promise<void> {
+  port = await findAvailablePort();
+  baseUrl = `http://127.0.0.1:${port}`;
   await fs.rm(databasePath, { force: true });
   await fs.rm(`${databasePath}-wal`, { force: true });
   await fs.rm(`${databasePath}-shm`, { force: true });
@@ -38,7 +58,9 @@ async function main(): Promise<void> {
   let serverReady = false;
   for (let attempt = 0; attempt < 80; attempt += 1) {
     try {
-      if ((await fetch(`${baseUrl}/api/health`)).ok) {
+      const response = await fetch(`${baseUrl}/api/health`);
+      const health = await response.json() as { status?: string };
+      if (response.ok && health.status === 'ok') {
         serverReady = true;
         break;
       }
