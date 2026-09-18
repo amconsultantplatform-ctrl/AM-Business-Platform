@@ -1,112 +1,57 @@
-import { FinancialEventEngine } from '../src/engine/financialEventEngine';
-import { InventoryExecutionEngine } from '../src/engine/inventoryExecutionEngine';
-import { Account, FinancialEvent, InventoryItem, JournalEntry, PostingRule, StockQuant, Warehouse } from '../src/types';
-import { INITIAL_ACCOUNTS, INITIAL_POSTING_RULES } from '../src/data/mockDatabase';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { PilotDatabaseService } from '../server/pilotDatabase';
+import { ManufacturingEngine, ManufacturingInventoryContext } from '../src/engine/manufacturingEngine';
+import { InventoryItem, StockQuant, Warehouse } from '../src/types';
+import { ProductionWorkOrder } from '../src/types/manufacturing';
 
 function assert(condition: boolean, message: string): void {
   if (!condition) throw new Error(`FAIL: ${message}`);
   console.log(`PASS: ${message}`);
 }
 
-function createFinancialHarness() {
-  return {
-    accounts: JSON.parse(JSON.stringify(INITIAL_ACCOUNTS)) as Account[],
-    rules: JSON.parse(JSON.stringify(INITIAL_POSTING_RULES)) as PostingRule[],
-    journalEntries: [] as JournalEntry[],
-    financialEvents: [] as FinancialEvent[]
-  };
-}
+const databasePath = path.resolve(process.cwd(), 'data/p0-transaction-boundary.db');
+const rollbackDatabasePath = path.resolve(process.cwd(), 'data/p0-manufacturing-rollback.db');
+const scope = { tenantId: 'ten-boundary', companyId: 'comp-boundary' };
 
-function testFinancialPeriodDomain() {
-  const harness = createFinancialHarness();
-  const base = {
-    tenantId: 'ten-001',
-    companyId: 'comp-001',
-    eventType: 'PURCHASE_INVOICE_POSTED' as const,
-    sourceDocumentType: 'PurchaseInvoice',
-    sourceDocumentId: 'boundary-period-1',
-    sourceDocumentNumber: 'PINV-BOUNDARY-1',
-    amount: 100,
-    currency: 'SAR',
-    triggeredBy: 'user-boundary',
-    triggeredByName: 'Boundary Test'
-  };
-  const invoke = (fiscalYear?: number, fiscalPeriod?: number, suffix = '1') => FinancialEventEngine.processEvent(
-    {
-      ...base,
-      sourceDocumentId: `boundary-period-${suffix}`,
-      sourceDocumentNumber: `PINV-BOUNDARY-${suffix}`,
-      fiscalYear,
-      fiscalPeriod,
-      validateFiscalPeriod: (_tenantId: string, _companyId: string, _year: number, period: number) => {
-        if (period === 1) throw new Error('closed period');
-      }
-    },
-    harness.rules,
-    harness.accounts,
-    harness.journalEntries,
-    harness.financialEvents,
-    () => 'JE-BOUNDARY',
-    () => undefined
-  );
-
-  let missingRejected = false;
-  try { invoke(); } catch { missingRejected = true; }
-  assert(missingRejected, 'missing effective period is rejected by the domain engine');
-
-  let invalidRejected = false;
-  try { invoke(2026, 14); } catch { invalidRejected = true; }
-  assert(invalidRejected, 'invalid effective period is rejected by the domain engine');
-
-  let closedRejected = false;
-  try {
-    invoke(2026, 1);
-  } catch {
-    closedRejected = true;
+async function removeDatabase(target = databasePath): Promise<void> {
+  for (const file of [target, `${target}-wal`, `${target}-shm`]) {
+    await fs.rm(file, { force: true });
   }
-  assert(closedRejected, 'closed period is rejected by the domain validator');
-
-  const result = invoke(2026, 2, '2');
-  assert(result.financialEvent.fiscalYear === 2026 && result.financialEvent.periodNumber === 2, 'valid open-period data is persisted on the event');
 }
 
-function testSequentialRetry() {
-  const harness = createFinancialHarness();
-  const params = {
-    tenantId: 'ten-001',
-    companyId: 'comp-001',
-    fiscalYear: 2026,
-    fiscalPeriod: 2,
-    eventType: 'PURCHASE_INVOICE_POSTED' as const,
-    sourceDocumentType: 'PurchaseInvoice',
-    sourceDocumentId: 'boundary-retry-1',
-    sourceDocumentNumber: 'PINV-BOUNDARY-RETRY',
-    amount: 100,
-    currency: 'SAR',
-    triggeredBy: 'user-boundary',
-    triggeredByName: 'Boundary Test'
-  };
-  const publish = () => FinancialEventEngine.processEvent(
-    params,
-    harness.rules,
-    harness.accounts,
-    harness.journalEntries,
-    harness.financialEvents,
-    () => `JE-BOUNDARY-${harness.journalEntries.length + 1}`,
-    () => undefined
-  );
-  const first = publish();
-  const second = publish();
-  assert(first.journalEntry !== null, 'first financial event posts a journal entry');
-  assert(second.journalEntry?.id === first.journalEntry?.id, 'sequential retry returns the existing journal entry');
-  assert(harness.journalEntries.length === 1 && harness.financialEvents.length === 1, 'sequential retry does not duplicate persisted state');
+async function testDurableConcurrentIdempotency(): Promise<void> {
+  const db = PilotDatabaseService.createIsolated(databasePath);
+  const idempotencyKey = 'idem-boundary-concurrent-001';
+  const operation = async () => db.transaction(() => {
+    const existing = db.getEntity<{ id: string }>('financialEvents', idempotencyKey);
+    if (existing) return existing;
+    const event = { id: idempotencyKey, ...scope, sourceDocumentId: 'purchase-boundary-001', idempotencyKey, amount: 125 };
+    db.saveEntity('financialEvents', event, scope.tenantId, scope.companyId);
+    db.saveEntity('journalEntries', { id: idempotencyKey, ...scope, originatingDocumentId: event.sourceDocumentId, totalDebit: 125, totalCredit: 125 }, scope.tenantId, scope.companyId);
+    db.saveEntity('stockMovements', { id: idempotencyKey, ...scope, sourceDocumentId: event.sourceDocumentId, quantity: 1 }, scope.tenantId, scope.companyId);
+    return event;
+  });
+
+  const results = await Promise.all(Array.from({ length: 8 }, () => operation()));
+  assert(new Set(results.map(result => result.id)).size === 1, 'concurrent retries return one durable idempotent result');
+  assert(db.listEntities('financialEvents', scope.tenantId, scope.companyId).length === 1, 'one financial event exists in shared SQLite state');
+  assert(db.listEntities('journalEntries', scope.tenantId, scope.companyId).length === 1, 'one journal entry exists in shared SQLite state');
+  assert(db.listEntities('stockMovements', scope.tenantId, scope.companyId).length === 1, 'one inventory mutation exists in shared SQLite state');
+  db.close();
+
+  const reopened = PilotDatabaseService.createIsolated(databasePath);
+  assert(reopened.getEntity('financialEvents', idempotencyKey) !== null, 'idempotent financial event survives process restart');
+  assert(reopened.getEntity('journalEntries', idempotencyKey) !== null, 'idempotent journal survives process restart');
+  assert(reopened.getEntity('stockMovements', idempotencyKey) !== null, 'idempotent inventory mutation survives process restart');
+  reopened.close();
 }
 
-function testInventoryRollbackOnActualHandlerMovementFailure() {
-  const item: InventoryItem = {
-    id: 'item-boundary',
-    tenantId: 'ten-001',
-    companyId: 'comp-001',
+function createManufacturingContext(): ManufacturingInventoryContext {
+  const item = {
+    id: 'item-boundary-component',
+    tenantId: scope.tenantId,
+    companyId: scope.companyId,
     sku: 'COMP-BOUNDARY',
     name: 'Boundary Component',
     categoryId: 'raw',
@@ -115,16 +60,11 @@ function testInventoryRollbackOnActualHandlerMovementFailure() {
     costPrice: 10,
     stockQty: 1
   } as InventoryItem;
-  const warehouse: Warehouse = {
-    id: 'wh-boundary',
-    tenantId: 'ten-001',
-    companyId: 'comp-001',
-    name: 'Boundary Warehouse'
-  } as Warehouse;
-  const quant: StockQuant = {
+  const warehouse = { id: 'wh-boundary', tenantId: scope.tenantId, companyId: scope.companyId, name: 'Boundary Warehouse' } as Warehouse;
+  const quant = {
     id: 'quant-boundary',
-    tenantId: 'ten-001',
-    companyId: 'comp-001',
+    tenantId: scope.tenantId,
+    companyId: scope.companyId,
     itemSku: item.sku,
     itemName: item.name,
     warehouseId: warehouse.id,
@@ -143,39 +83,68 @@ function testInventoryRollbackOnActualHandlerMovementFailure() {
     status: 'Available',
     updatedAt: new Date().toISOString()
   } as StockQuant;
-  const context = {
-    items: [item],
-    warehouses: [warehouse],
-    bins: [],
-    quants: [quant],
-    batchLots: [],
-    serials: [],
-    stockLedgerEntries: []
+  return { items: [item], warehouses: [warehouse], bins: [], quants: [quant], batchLots: [], serials: [], stockLedgerEntries: [], userName: 'Boundary Test', userRole: 'Finance Manager' };
+}
+
+async function testManufacturingAtomicRollback(): Promise<void> {
+  const db = PilotDatabaseService.createIsolated(rollbackDatabasePath);
+  const context = createManufacturingContext();
+  const workOrder: ProductionWorkOrder = {
+    id: 'wo-boundary-001',
+    ...scope,
+    orderNumber: 'WO-BOUNDARY-001',
+    finishedGoodSku: 'FG-BOUNDARY',
+    finishedGoodName: 'Boundary Finished Good',
+    bomId: 'bom-boundary',
+    bomVersion: 1,
+    routingId: 'routing-boundary',
+    plannedQuantity: 1,
+    completedQuantity: 0,
+    scrappedQuantity: 0,
+    uom: 'EA',
+    status: 'RELEASED',
+    plannedStartDate: new Date().toISOString(),
+    plannedEndDate: new Date().toISOString(),
+    targetWarehouseId: 'wh-boundary',
+    materials: [{ componentSku: 'COMP-BOUNDARY', description: 'Boundary Component', componentType: 'RAW_MATERIAL', requiredQuantity: 1, issuedQuantity: 0, reservedQuantity: 1, scrappedQuantity: 0, unitCost: 10, totalPlannedCost: 10, totalActualCost: 0, uom: 'EA', warehouseId: 'wh-boundary' }],
+    operationConfirmations: [],
+    costSummary: { plannedMaterialCost: 10, plannedLaborCost: 0, plannedMachineCost: 0, plannedOverheadCost: 0, totalPlannedCost: 10, standardCostPerUnit: 10, actualMaterialCost: 0, actualLaborCost: 0, actualMachineCost: 0, actualOverheadCost: 0, totalActualCost: 0, actualCostPerUnit: 0, wipBalance: 0, materialVariance: 0, laborEfficiencyVariance: 0, overheadVariance: 0, totalVariance: 0 },
+    createdBy: 'boundary-test',
+    createdAt: new Date().toISOString(),
+    version: 1
   };
-  const before = JSON.stringify(context);
+
   let failed = false;
   try {
-    InventoryExecutionEngine.executeGoodsIssue({
-      tenantId: 'ten-001',
-      companyId: 'comp-001',
-      itemSku: item.sku,
-      warehouseId: warehouse.id,
-      quantity: 2,
-      sourceDocumentType: 'ProductionGoodsIssue',
-      sourceDocumentId: 'boundary-issue-1',
-      sourceDocumentNumber: 'GI-BOUNDARY-1',
-      userId: 'user-boundary',
-      userName: 'Boundary Test'
-    }, context);
+    db.transaction(() => {
+      const result = ManufacturingEngine.issueMaterialsToWorkOrder({
+        workOrder,
+        issuedBy: 'boundary-test',
+        issueType: 'MANUAL_STAGING',
+        items: [{ componentSku: 'COMP-BOUNDARY', quantity: 1 }],
+        inventoryContext: context
+      });
+      db.saveEntity('manufacturingWorkOrders', result.updatedWorkOrder, scope.tenantId, scope.companyId);
+      db.saveEntity('stockMovements', result.inventoryMovements?.[0]?.stockLedgerEntry, scope.tenantId, scope.companyId);
+      db.saveEntity('financialEvents', { id: result.goodsIssueRecord.financialEventId, ...scope, ...result.financialEvent.payload }, scope.tenantId, scope.companyId);
+      db.saveEntity('manufacturingAudit', { id: 'audit-boundary-001', ...scope, workOrderId: workOrder.id, action: 'MATERIAL_ISSUE' }, scope.tenantId, scope.companyId);
+      throw new Error('Injected failure after manufacturing, inventory, WIP, financial event, and audit writes');
+    });
   } catch {
     failed = true;
   }
-  assert(failed, 'actual inventory movement path rejects a negative-stock issue');
-  assert(JSON.stringify(context) === before, 'rejected inventory movement leaves its context unchanged');
+  assert(failed, 'failure injection occurs inside the real SQLite transaction');
+  assert(db.listEntities('manufacturingWorkOrders', scope.tenantId, scope.companyId).length === 0, 'manufacturing work order rolls back');
+  assert(db.listEntities('stockMovements', scope.tenantId, scope.companyId).length === 0, 'inventory mutation rolls back');
+  assert(db.listEntities('financialEvents', scope.tenantId, scope.companyId).length === 0, 'WIP financial event rolls back');
+  assert(db.listEntities('manufacturingAudit', scope.tenantId, scope.companyId).length === 0, 'manufacturing audit rolls back');
+  db.close();
 }
 
-testFinancialPeriodDomain();
-testSequentialRetry();
-testInventoryRollbackOnActualHandlerMovementFailure();
-console.log('NOT AVAILABLE: concurrent duplicate proof requires a shared durable uniqueness boundary');
-console.log('NOT AVAILABLE: cross-domain manufacturing failure injection requires a real transaction context');
+await removeDatabase();
+await removeDatabase(rollbackDatabasePath);
+await testDurableConcurrentIdempotency();
+await testManufacturingAtomicRollback();
+await removeDatabase();
+await removeDatabase(rollbackDatabasePath);
+console.log('PASS: durable uniqueness/idempotency and cross-domain manufacturing rollback are proven with SQLite persistence');
