@@ -30,6 +30,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Install browser runtime
+        run: npx playwright install --with-deps chromium
+
       - name: Lint
         run: npm run lint
 
@@ -73,7 +76,7 @@ jobs:
         run: npm run test:financial-localization-costing
 
       - name: Browser acceptance
-        run: npx playwright install --with-deps chromium && npm run test:first-run-browser && npm run test:browser-acceptance
+        run: npm run test:first-run-browser && npm run test:browser-acceptance
 
       - name: Dependency security audit
         run: npm audit --audit-level=high
