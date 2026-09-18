@@ -62,18 +62,22 @@ function entityScope(records: SourceRecord[], tenantId: string | undefined, comp
     const value = record as RecordShape;
     const recordCompany = value.companyId ?? value.company_id;
     const recordTenant = value.tenantId ?? value.tenant_id;
-    return recordCompany === undefined || recordCompany === companyId
-      ? (tenantId === undefined || recordTenant === undefined || recordTenant === tenantId)
-      : false;
+    return recordCompany === companyId && (tenantId === undefined || recordTenant === tenantId);
   });
+}
+
+function recordDate(record: SourceRecord): string | undefined {
+  const value = record as RecordShape;
+  const raw = value.postingDate ?? value.date ?? value.effectiveDate ?? value.createdAt ?? value.updatedAt;
+  if (typeof raw !== 'string' || !/^\d{4}-\d{2}-\d{2}/.test(raw)) return undefined;
+  return raw.slice(0, 10);
 }
 
 function datedRecords(records: SourceRecord[], period: string): SourceRecord[] {
   const { start, end } = periodBounds(period);
   return records.filter(record => {
-    const value = record as RecordShape;
-    const date = String(value.postingDate ?? value.date ?? value.createdAt ?? value.updatedAt ?? '');
-    return date === '' || (date.slice(0, 10) >= start && date.slice(0, 10) <= end);
+    const date = recordDate(record);
+    return date !== undefined && date >= start && date <= end;
   });
 }
 
@@ -161,11 +165,14 @@ export class ReconciliationEngine {
     const scope = (records: SourceRecord[] = []) => entityScope(records, tenantId, companyId);
     const periodSource = (records: SourceRecord[] = []) => datedRecords(scope(records), period);
     const journals = periodSource(params.journalEntries);
-    const openings = scope(params.openingBalances).filter(record => {
+    const { start } = periodBounds(period);
+    const openingRecords = scope(params.openingBalances).filter(record => {
       const value = record as RecordShape;
-      return String(value.period ?? value.fiscalPeriod ?? '') <= period;
+      const date = recordDate(record);
+      return date !== undefined && date < start && String(value.module ?? '') !== '';
     });
-    const openingValue = sumField(openings, ['amount', 'balance', 'openingBalance']);
+    const openingFor = (module: ReconciliationModule): number | undefined =>
+      sumField(openingRecords.filter(record => String((record as RecordShape).module) === module), ['amount', 'balance', 'openingBalance']);
     const financialEvents = periodSource(params.financialEvents);
     const payroll = periodSource(params.payrollRuns);
     const payrollValue = sumField(payroll, ['netTotal', 'grossTotal', 'total']);
@@ -177,7 +184,6 @@ export class ReconciliationEngine {
     const banks = periodSource(params.banks);
     const invoices = periodSource(params.invoices);
     const purchaseInvoices = periodSource(params.purchaseInvoices);
-    const sourceOpening = openingValue;
     const eventMovements = sumField(financialEvents, ['amount', 'totalAmount']);
 
     const ar = sumField(customers, ['balance', 'outstandingBalance']);
@@ -194,6 +200,10 @@ export class ReconciliationEngine {
     const purchaseMovement = sumField(purchaseInvoices, ['grandTotal', 'totalAmount', 'amount']);
 
     const gl = (codes: string[], normalBalance: 'debit' | 'credit' = 'debit') => journalBalance(journals, codes, normalBalance);
+    const moduleMovements = (module: ReconciliationModule, fallback: number | undefined): number | undefined => {
+      const moduleEvents = financialEvents.filter(event => String((event as RecordShape).module ?? (event as RecordShape).eventType ?? '').toUpperCase().includes(module));
+      return moduleEvents.length ? sumField(moduleEvents, ['amount', 'totalAmount']) : fallback;
+    };
     const source = (name: string, records: SourceRecord[], extra = '') =>
       `${name}${records.length ? ` (${records.length} persisted record${records.length === 1 ? '' : 's'})` : ''}${extra}`;
 
@@ -202,14 +212,14 @@ export class ReconciliationEngine {
       companyId,
       generatedAt: new Date().toISOString(),
       modules: [
-        line('AR', period, companyId, sourceOpening, invoiceMovement, ar, gl(['1020']), source('AR', customers)),
-        line('AP', period, companyId, sourceOpening, purchaseMovement, ap, gl(['2010'], 'credit'), source('AP', vendors)),
-        line('INVENTORY', period, companyId, sourceOpening, eventMovements, inventoryBalance, gl(['1030', '1200', '1250', '1300']), source('Inventory', inventory)),
-        line('ASSETS', period, companyId, sourceOpening, eventMovements, assetBalance, gl(['1510', '1520', '1530']), source('Assets', assets)),
-        line('BANK', period, companyId, sourceOpening, eventMovements, bankBalance, gl(['1010']), source('Bank', banks)),
-        line('TAX', period, companyId, sourceOpening, eventMovements, gl(['1040', '2020']), gl(['1040', '2020']), source('Tax', journals)),
-        line('PAYROLL', period, companyId, sourceOpening, payrollValue, payrollValue, gl(['2100', '2110', '2200'], 'credit'), source('Payroll', payroll)),
-        line('OPENING_BALANCES', period, companyId, sourceOpening, undefined, sourceOpening, sourceOpening, source('Opening balances', openings, financialEvents.length ? `; ${financialEvents.length} financial event(s)` : ''), undefined, false)
+        line('AR', period, companyId, openingFor('AR'), moduleMovements('AR', invoiceMovement), ar, gl(['1020']), source('AR', customers)),
+        line('AP', period, companyId, openingFor('AP'), moduleMovements('AP', purchaseMovement), ap, gl(['2010'], 'credit'), source('AP', vendors)),
+        line('INVENTORY', period, companyId, openingFor('INVENTORY'), moduleMovements('INVENTORY', eventMovements), inventoryBalance, gl(['1030', '1200', '1250', '1300']), source('Inventory', inventory)),
+        line('ASSETS', period, companyId, openingFor('ASSETS'), moduleMovements('ASSETS', undefined), assetBalance, gl(['1510', '1520', '1530']), source('Assets', assets)),
+        line('BANK', period, companyId, openingFor('BANK'), moduleMovements('BANK', undefined), bankBalance, gl(['1010']), source('Bank', banks)),
+        line('TAX', period, companyId, openingFor('TAX'), moduleMovements('TAX', undefined), gl(['1040', '2020']), gl(['1040', '2020']), source('Tax', journals)),
+        line('PAYROLL', period, companyId, openingFor('PAYROLL'), moduleMovements('PAYROLL', payrollValue), payrollValue, gl(['2100', '2110', '2200'], 'credit'), source('Payroll', payroll)),
+        line('OPENING_BALANCES', period, companyId, openingFor('OPENING_BALANCES'), undefined, openingFor('OPENING_BALANCES'), openingFor('OPENING_BALANCES'), source('Opening balances', openingRecords), undefined, false)
       ]
     };
   }
