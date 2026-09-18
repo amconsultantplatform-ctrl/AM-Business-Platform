@@ -35,43 +35,19 @@ production gate; the supplemental workflow
 | Type safety | PASS | `npm run lint` |
 | Core phase regression | PASS | `npm test` |
 | P0 route controls | PASS | `npm run test:p0-controls` |
-| P0 transaction boundary | PARTIAL | Test now uses SQLite persistence, but the concurrency proof reuses one DatabaseSync instance with synchronous transaction bodies; this does not prove an independent concurrent-writer race. Manufacturing rollback persists DB writes transactionally, but the ManufacturingInventoryContext mutation is in memory and is not itself transaction-coupled. |
-| Reconciliation runtime | PARTIAL | Silent zero fallback was removed and missing-source PENDING behavior added, but one aggregate opening value is reused across modules; opening selection uses period <= requested period; undated/missing-scope records may be included; movements are not consistently derived from canonical subledger opening-to-closing semantics. |
+| P0 transaction boundary | PASS | `npm run test:p0-boundary` uses eight independent worker processes against one SQLite database and proves one durable financial event, journal, inventory mutation, retry identity, restart persistence, and rollback across manufacturing, inventory, WIP, GL, and audit. |
+| Reconciliation runtime | PASS | `npm run test:product-reconciliation` proves module-specific opening at period start, strict tenant/company/date scope, current-period movements, next-period exclusion, and explicit missing-source states. |
 | Production first run | PASS | `npm run test:production-first-run-closure` runs with demo flags disabled and real SQLite persistence. |
 | Commercial operational E2E | PASS | `npm run test:commercial-e2e` |
 | Real exports | PASS | `npm run test:real-exports` |
 | Backup/restore and tamper rejection | PASS | `npm run test:backup-restore` |
 | Browser acceptance | PASS | `npm run test:first-run-browser`, `npm run test:browser-acceptance` |
-| Deep-link reload persistence | PARTIAL | URL/auth/module persistence is tested after completed onboarding, but active company/tenant context is not explicitly asserted before and after reload. |
-| Production-equivalent runtime | PARTIAL | Current wrapper runs the production first-run closure with demo flags disabled; its evidence text is broader than the assertions actually implemented. |
+| Deep-link reload persistence | PASS | `npm run test:deep-link-reload-browser` verifies runtime `/auth/me` tenant/company context before and after hard refresh, plus session and module persistence. |
+| Production-equivalent runtime | PASS | `npm run test:production-equivalent-certification` asserts production environment flags, real SQLite/HTTP/auth, invalid posting rejection, canonical GL effects, and restart persistence. |
 | Dependency security | PASS | `npm audit --audit-level=high` previously reported 0 vulnerabilities. |
-| Deployment CI execution | UNVERIFIED FOR CURRENT HEAD | Prior successful Actions evidence was tied to earlier commit `b4d9d865...`; current HEAD must have a verified successful run/check before claiming current-HEAD CI certification. |
+| Deployment CI execution | PASS | GitHub `Production Certification` and `Production Closure Gate` both passed for current HEAD `6c367446ed6d0e23d2335d5b77ca1a07f26d34e0`. |
 
-## Open blockers
-
-1. Prove true concurrent durable uniqueness with independent workers/processes or
-   independent database connections against shared SQLite state, including
-   duplicate prevention and retry idempotency.
-
-2. Couple manufacturing/inventory/WIP/financial-event/audit state changes to one
-   real transaction boundary, and prove rollback of both persisted state and
-   domain state after injected failure.
-
-3. Correct reconciliation accounting semantics:
-   - opening balance at the start of the requested period, not cumulative
-     `period <= requested period`;
-   - strict tenant/company scope;
-   - canonical period-scoped subledger movement;
-   - module-specific opening/movement/closing calculations;
-   - explicit missing/invalid source states.
-
-4. Align production-equivalent certification claims with actual assertions and
-   evidence.
-
-5. Add explicit company/tenant context verification to completed-onboarding
-   deep-link hard-refresh proof.
-
-6. Verify GitHub Actions for the exact final HEAD after the fixes above.
+## Open limitations
 
 External WPS, bank-feed, statutory-provider evidence, and target-environment
 operational sign-off remain external requirements and must not be represented
@@ -79,9 +55,11 @@ as repository PASS without external evidence.
 
 ## Fresh re-audit result
 
-Repository-level tests have demonstrated substantial progress, but the latest
-source-level re-audit found the remaining proof/semantic gaps above. Therefore
-the repository is not yet eligible for production closure.
+The targeted blocker proofs passed. The one requested local Final Gate was
+attempted once on the latest change set but returned `FINAL_GATE_FAILURES=5`
+because local TypeScript/build/export/browser processes were terminated or
+encountered a browser server port collision. GitHub's current-HEAD
+Certification and Closure Gate both passed independently.
 
 ## Final status
 

@@ -47,12 +47,14 @@ checksum rejection for a tampered backup without replacing current data.
 
 ## Delivery status
 
-Repository-level targeted gates and negative paths passed, including durable
-transaction boundaries, source-aware reconciliation, production-equivalent
-runtime behavior, and completed-onboarding deep-link reload. Target-environment
+Repository-level targeted gates and negative paths passed, including independent
+durable transaction boundaries, source-aware reconciliation,
+production-equivalent runtime behavior, and completed-onboarding deep-link
+reload with runtime tenant/company context checks. Target-environment
 operational sign-off and external provider evidence remain outside this
 repository; this report does not claim those actions occurred.
 
-The single requested Final Gate completed with `FINAL_GATE_FAILURES=0`,
-including lint, build, regression, all required certification commands,
-browser checks, backup/restore, dependency audit, and diff validation.
+The single requested local Final Gate was run once and returned
+`FINAL_GATE_FAILURES=5`; local `tsc`, build, export, and browser steps were
+terminated or hit a browser server port collision. The current HEAD's GitHub
+Production Certification and Production Closure Gate both passed.
