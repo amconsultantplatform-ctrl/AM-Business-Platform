@@ -15,15 +15,16 @@ export interface ReconciliationLine {
   period: string;
   companyId: string;
   branchId?: string;
-  opening: number;
-  movements: number;
-  adjustments: number;
-  subledgerBalance: number;
-  glBalance: number;
-  difference: number;
+  opening: number | null;
+  movements: number | null;
+  adjustments: number | null;
+  subledgerBalance: number | null;
+  glBalance: number | null;
+  difference: number | null;
   status: ReconciliationStatus;
   lastUpdated: string;
   source: string;
+  exception?: string;
 }
 
 export interface ReconciliationReport {
@@ -33,114 +34,182 @@ export interface ReconciliationReport {
   modules: ReconciliationLine[];
 }
 
-function amount(value: unknown): number {
+type SourceRecord = object;
+type RecordShape = Record<string, unknown>;
+
+function numeric(value: unknown): number | undefined {
+  if (value === null || value === undefined || value === '') return undefined;
   const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : 0;
+  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 function rounded(value: number): number {
   return Math.round(value * 100) / 100;
 }
 
-function glBalance(accounts: any[], codes: string[]): number {
-  return rounded(accounts
-    .filter(account => codes.includes(String(account.code)))
-    .reduce((total, account) => total + amount(account.balance), 0));
+function periodBounds(period: string): { start: string; end: string } {
+  const match = /^(\d{4})-(\d{2})$/.exec(period);
+  if (!match) throw new Error(`Invalid reconciliation period '${period}'. Expected YYYY-MM.`);
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  if (month < 1 || month > 12) throw new Error(`Invalid reconciliation month '${period}'.`);
+  const end = new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
+  return { start: `${match[1]}-${match[2]}-01`, end };
 }
 
-function statusFor(subledgerBalance: number, gl: number, hasSource: boolean): ReconciliationStatus {
-  if (!hasSource) return 'PENDING';
-  return Math.abs(subledgerBalance - gl) < 0.01 ? 'COMPLETED' : 'EXCEPTION';
+function entityScope(records: SourceRecord[], tenantId: string | undefined, companyId: string): SourceRecord[] {
+  return records.filter(record => {
+    const value = record as RecordShape;
+    const recordCompany = value.companyId ?? value.company_id;
+    const recordTenant = value.tenantId ?? value.tenant_id;
+    return recordCompany === undefined || recordCompany === companyId
+      ? (tenantId === undefined || recordTenant === undefined || recordTenant === tenantId)
+      : false;
+  });
+}
+
+function datedRecords(records: SourceRecord[], period: string): SourceRecord[] {
+  const { start, end } = periodBounds(period);
+  return records.filter(record => {
+    const value = record as RecordShape;
+    const date = String(value.postingDate ?? value.date ?? value.createdAt ?? value.updatedAt ?? '');
+    return date === '' || (date.slice(0, 10) >= start && date.slice(0, 10) <= end);
+  });
+}
+
+function sumField(records: SourceRecord[], fields: string[]): number | undefined {
+  if (records.length === 0) return undefined;
+  let total = 0;
+  for (const record of records) {
+    const value = fields.map(field => numeric((record as RecordShape)[field])).find(value => value !== undefined);
+    if (value === undefined) return undefined;
+    total += value;
+  }
+  return rounded(total);
+}
+
+function journalBalance(journalEntries: SourceRecord[], codes: string[], normalBalance: 'debit' | 'credit' = 'debit'): number | undefined {
+  if (journalEntries.length === 0) return undefined;
+  let total = 0;
+  for (const entry of journalEntries) {
+    const lines = Array.isArray((entry as RecordShape).lines) ? (entry as RecordShape).lines as SourceRecord[] : [];
+    for (const line of lines) {
+      const value = line as RecordShape;
+      if (!codes.includes(String(value.accountCode ?? value.code))) continue;
+      const debit = numeric(value.debit);
+      const credit = numeric(value.credit);
+      if (debit === undefined || credit === undefined) return undefined;
+      total += normalBalance === 'debit' ? debit - credit : credit - debit;
+    }
+  }
+  return rounded(total);
 }
 
 function line(
   module: ReconciliationModule,
   period: string,
   companyId: string,
-  subledgerBalance: number,
-  gl: number,
+  opening: number | undefined,
+  movements: number | undefined,
+  subledgerBalance: number | undefined,
+  gl: number | undefined,
   source: string,
-  movements = 0,
-  adjustments = 0
+  exception?: string,
+  requireMovements = true
 ): ReconciliationLine {
-  const normalizedSubledger = rounded(subledgerBalance);
-  const normalizedGl = rounded(gl);
+  const complete = [opening, subledgerBalance, gl, ...(requireMovements ? [movements] : [])].every(value => value !== undefined);
+  const difference = subledgerBalance !== undefined && gl !== undefined
+    ? rounded(subledgerBalance - gl)
+    : null;
   return {
     module,
     period,
     companyId,
-    opening: 0,
-    movements: rounded(movements),
-    adjustments: rounded(adjustments),
-    subledgerBalance: normalizedSubledger,
-    glBalance: normalizedGl,
-    difference: rounded(normalizedSubledger - normalizedGl),
-    status: statusFor(normalizedSubledger, normalizedGl, Boolean(source)),
+    opening: opening === undefined ? null : rounded(opening),
+    movements: movements === undefined ? null : rounded(movements),
+    adjustments: null,
+    subledgerBalance: subledgerBalance === undefined ? null : rounded(subledgerBalance),
+    glBalance: gl === undefined ? null : rounded(gl),
+    difference,
+    status: exception ? 'PENDING' : !complete ? 'PENDING' : Math.abs(difference || 0) < 0.01 ? 'COMPLETED' : 'EXCEPTION',
     lastUpdated: new Date().toISOString(),
-    source
+    source,
+    ...(exception || !complete ? { exception: exception || 'A persisted source is missing or contains an invalid amount.' } : {})
   };
 }
 
 export class ReconciliationEngine {
   static generateReport(params: {
+    tenantId?: string;
     companyId: string;
     period: string;
-    accounts: any[];
-    customers: any[];
-    vendors: any[];
-    inventory: any[];
-    fixedAssets: any[];
-    banks: any[];
-    invoices: any[];
-    purchaseInvoices: any[];
+    accounts?: SourceRecord[];
+    journalEntries?: SourceRecord[];
+    financialEvents?: SourceRecord[];
+    openingBalances?: SourceRecord[];
+    payrollRuns?: SourceRecord[];
+    customers: SourceRecord[];
+    vendors: SourceRecord[];
+    inventory: SourceRecord[];
+    fixedAssets: SourceRecord[];
+    banks: SourceRecord[];
+    invoices: SourceRecord[];
+    purchaseInvoices: SourceRecord[];
   }): ReconciliationReport {
-    const {
-      companyId,
-      period,
-      accounts,
-      customers,
-      vendors,
-      inventory,
-      fixedAssets,
-      banks,
-      invoices,
-      purchaseInvoices
-    } = params;
+    const { tenantId, companyId, period } = params;
+    periodBounds(period);
+    const scope = (records: SourceRecord[] = []) => entityScope(records, tenantId, companyId);
+    const periodSource = (records: SourceRecord[] = []) => datedRecords(scope(records), period);
+    const journals = periodSource(params.journalEntries);
+    const openings = scope(params.openingBalances).filter(record => {
+      const value = record as RecordShape;
+      return String(value.period ?? value.fiscalPeriod ?? '') <= period;
+    });
+    const openingValue = sumField(openings, ['amount', 'balance', 'openingBalance']);
+    const financialEvents = periodSource(params.financialEvents);
+    const payroll = periodSource(params.payrollRuns);
+    const payrollValue = sumField(payroll, ['netTotal', 'grossTotal', 'total']);
 
-    const inventoryBalance = inventory.reduce(
-      (total, item) => total + amount(item.stockQty) * amount(item.costPrice || item.unitCost),
-      0
-    );
-    const assetBalance = fixedAssets.reduce(
-      (total, asset) => total + amount(asset.netBookValue ?? asset.bookValue ?? asset.currentBookValue ?? asset.acquisitionCost),
-      0
-    );
-    const bankBalance = banks.reduce(
-      (total, bank) => total + amount(bank.currentBalance ?? bank.balance ?? bank.availableBalance),
-      0
-    );
-    const arBalance = customers.reduce((total, customer) => total + amount(customer.balance), 0);
-    const apBalance = vendors.reduce((total, vendor) => total + amount(vendor.balance), 0);
-    const taxBalance = glBalance(accounts, ['1040', '2020']);
-    const inventoryMovement = inventory.reduce((total, item) => total + amount(item.stockQty) * amount(item.costPrice || item.unitCost), 0);
-    const hasAssets = fixedAssets.length > 0;
-    const hasBanks = banks.length > 0;
-    const hasPayroll = false;
-    const hasOpeningBalances = false;
+    const customers = periodSource(params.customers);
+    const vendors = periodSource(params.vendors);
+    const inventory = periodSource(params.inventory);
+    const assets = periodSource(params.fixedAssets);
+    const banks = periodSource(params.banks);
+    const invoices = periodSource(params.invoices);
+    const purchaseInvoices = periodSource(params.purchaseInvoices);
+    const sourceOpening = openingValue;
+    const eventMovements = sumField(financialEvents, ['amount', 'totalAmount']);
+
+    const ar = sumField(customers, ['balance', 'outstandingBalance']);
+    const ap = sumField(vendors, ['balance', 'outstandingBalance']);
+    const inventoryBalance = inventory.length === 0 ? undefined : inventory.reduce<number | undefined>((total, item) => {
+        const value = item as RecordShape;
+        const quantity = numeric(value.stockQty ?? value.quantity);
+        const cost = numeric(value.costPrice ?? value.unitCost);
+      return total === undefined || quantity === undefined || cost === undefined ? undefined : total + quantity * cost;
+    }, 0);
+    const assetBalance = sumField(assets, ['netBookValue', 'bookValue', 'currentBookValue', 'acquisitionCost']);
+    const bankBalance = sumField(banks, ['currentBalance', 'balance', 'availableBalance']);
+    const invoiceMovement = sumField(invoices, ['grandTotal', 'totalAmount', 'amount']);
+    const purchaseMovement = sumField(purchaseInvoices, ['grandTotal', 'totalAmount', 'amount']);
+
+    const gl = (codes: string[], normalBalance: 'debit' | 'credit' = 'debit') => journalBalance(journals, codes, normalBalance);
+    const source = (name: string, records: SourceRecord[], extra = '') =>
+      `${name}${records.length ? ` (${records.length} persisted record${records.length === 1 ? '' : 's'})` : ''}${extra}`;
 
     return {
       period,
       companyId,
       generatedAt: new Date().toISOString(),
       modules: [
-        line('AR', period, companyId, arBalance, glBalance(accounts, ['1020']), 'customers.balance + account 1020', invoices.reduce((t, invoice) => t + amount(invoice.grandTotal || invoice.totalAmount), 0)),
-        line('AP', period, companyId, apBalance, glBalance(accounts, ['2010']), 'vendors.balance + account 2010', purchaseInvoices.reduce((t, invoice) => t + amount(invoice.grandTotal || invoice.totalAmount || invoice.amount), 0)),
-        line('INVENTORY', period, companyId, inventoryBalance, glBalance(accounts, ['1030', '1200', '1250', '1300']), 'inventory stockQty * costPrice', inventoryMovement),
-        line('ASSETS', period, companyId, assetBalance, glBalance(accounts, ['1510', '1520', '1530']), hasAssets ? 'fixed asset register' : ''),
-        line('BANK', period, companyId, bankBalance, glBalance(accounts, ['1010']), hasBanks ? 'bank master balances' : ''),
-        line('TAX', period, companyId, taxBalance, glBalance(accounts, ['1040', '2020']), 'input/output VAT accounts'),
-        line('PAYROLL', period, companyId, 0, 0, hasPayroll ? 'payroll subledger' : ''),
-        line('OPENING_BALANCES', period, companyId, 0, 0, hasOpeningBalances ? 'opening balance register' : '')
+        line('AR', period, companyId, sourceOpening, invoiceMovement, ar, gl(['1020']), source('AR', customers)),
+        line('AP', period, companyId, sourceOpening, purchaseMovement, ap, gl(['2010'], 'credit'), source('AP', vendors)),
+        line('INVENTORY', period, companyId, sourceOpening, eventMovements, inventoryBalance, gl(['1030', '1200', '1250', '1300']), source('Inventory', inventory)),
+        line('ASSETS', period, companyId, sourceOpening, eventMovements, assetBalance, gl(['1510', '1520', '1530']), source('Assets', assets)),
+        line('BANK', period, companyId, sourceOpening, eventMovements, bankBalance, gl(['1010']), source('Bank', banks)),
+        line('TAX', period, companyId, sourceOpening, eventMovements, gl(['1040', '2020']), gl(['1040', '2020']), source('Tax', journals)),
+        line('PAYROLL', period, companyId, sourceOpening, payrollValue, payrollValue, gl(['2100', '2110', '2200'], 'credit'), source('Payroll', payroll)),
+        line('OPENING_BALANCES', period, companyId, sourceOpening, undefined, sourceOpening, sourceOpening, source('Opening balances', openings, financialEvents.length ? `; ${financialEvents.length} financial event(s)` : ''), undefined, false)
       ]
     };
   }

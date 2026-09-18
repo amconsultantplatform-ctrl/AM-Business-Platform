@@ -3345,12 +3345,18 @@ async function startServer() {
   });
 
   app.get('/api/v1/reports/reconciliation', (req: Request, res: Response) => {
-    const companyId = String(req.query.companyId || 'comp-001');
+    const scope = getAuthenticatedScope(req);
+    const companyId = scope.companyId;
     const period = String(req.query.period || new Date().toISOString().slice(0, 7));
     const report = ReconciliationEngine.generateReport({
+      tenantId: scope.tenantId,
       companyId,
       period,
       accounts,
+      journalEntries: glJournals,
+      financialEvents,
+      openingBalances: glJournals.filter(journal => journal.journalType === 'OPENING'),
+      payrollRuns,
       customers,
       vendors,
       inventory,

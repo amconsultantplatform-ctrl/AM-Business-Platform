@@ -6,12 +6,12 @@ import { usePlatform } from '../../context/PlatformContext';
 type ReconciliationLine = {
   module: string;
   period: string;
-  opening: number;
-  movements: number;
-  adjustments: number;
-  subledgerBalance: number;
-  glBalance: number;
-  difference: number;
+  opening: number | null;
+  movements: number | null;
+  adjustments: number | null;
+  subledgerBalance: number | null;
+  glBalance: number | null;
+  difference: number | null;
   status: 'COMPLETED' | 'EXCEPTION' | 'PENDING';
   lastUpdated: string;
   source: string;
@@ -54,11 +54,11 @@ export const ReconciliationCenter: React.FC = () => {
 
   useEffect(() => { load(); }, [period, activeCompany?.id]);
 
-  const format = (value: number) => value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const format = (value: number | null) => value === null ? '—' : value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const completed = rows.filter(row => row.status === 'COMPLETED').length;
   const exceptions = rows.filter(row => row.status === 'EXCEPTION').length;
   const pending = rows.filter(row => row.status === 'PENDING').length;
-  const difference = rows.reduce((total, row) => total + Math.abs(row.difference), 0);
+  const difference = rows.reduce((total, row) => total + (row.difference === null ? 0 : Math.abs(row.difference)), 0);
 
   return (
     <div className="space-y-5">
