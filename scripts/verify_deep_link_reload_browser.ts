@@ -93,6 +93,12 @@ async function main(): Promise<void> {
     assert(/Finance|Accounting|المالية|المحاسبة/i.test(initialBody), 'requested accounting module renders directly');
     const authBefore = await page.evaluate(async token => (await fetch('/api/v1/auth/me', { headers: { authorization: `Bearer ${token}` } })).ok, login.token);
     assert(authBefore, 'authenticated session is valid before hard refresh');
+    const contextBefore = await page.evaluate(async token => {
+      const response = await fetch('/api/v1/auth/me', { headers: { authorization: `Bearer ${token}` } });
+      return await response.json() as { tenant?: { id?: string }; company?: { id?: string } };
+    }, login.token);
+    assert(contextBefore.tenant?.id === tenantId, 'active tenant context matches the completed onboarding tenant before refresh');
+    assert(contextBefore.company?.id === companyId, 'active company context matches the completed onboarding company before refresh');
     await page.reload({ waitUntil: 'networkidle' });
     await page.waitForFunction(() => !document.body.innerText.includes('Loading platform'));
     assert(new URL(page.url()).searchParams.get('module') === 'accounting', 'hard refresh preserves the direct module URL');
@@ -101,6 +107,12 @@ async function main(): Promise<void> {
     if (!/Finance|Accounting|المالية|المحاسبة/i.test(reloadedBody)) console.log(`DEEP_LINK_RELOADED_BODY: ${reloadedBody.slice(0, 1800)}`);
     assert(/Finance|Accounting|المالية|المحاسبة/i.test(reloadedBody), 'requested module survives hard refresh');
     assert(await page.evaluate(async token => (await fetch('/api/v1/auth/me', { headers: { authorization: `Bearer ${token}` } })).ok, login.token), 'authenticated session survives hard refresh');
+    const contextAfter = await page.evaluate(async token => {
+      const response = await fetch('/api/v1/auth/me', { headers: { authorization: `Bearer ${token}` } });
+      return await response.json() as { tenant?: { id?: string }; company?: { id?: string } };
+    }, login.token);
+    assert(contextAfter.tenant?.id === tenantId, 'active tenant context survives hard refresh');
+    assert(contextAfter.company?.id === companyId, 'active company context survives hard refresh');
     await context.close();
   } finally {
     await browser.close();
