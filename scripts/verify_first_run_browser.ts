@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { spawn, type ChildProcess } from 'node:child_process';
 
-const port = 3358;
+const port = Number(process.env.FIRST_RUN_BROWSER_PORT || 3361);
 const baseUrl = `http://127.0.0.1:${port}`;
 const databasePath = path.resolve(process.cwd(), 'data/first-run-browser.db');
 const evidencePath = path.resolve(process.cwd(), 'data/browser-acceptance/first-run-welcome.png');
@@ -32,14 +32,20 @@ async function main(): Promise<void> {
       DEMO_MODE: 'false',
       ALLOW_DEMO_SEED_DATA: 'false'
     },
-    stdio: ['ignore', 'pipe', 'pipe']
+    stdio: ['ignore', 'pipe', 'pipe'],
+    detached: true
   });
+  let serverReady = false;
   for (let attempt = 0; attempt < 80; attempt += 1) {
     try {
-      if ((await fetch(`${baseUrl}/api/health`)).ok) break;
+      if ((await fetch(`${baseUrl}/api/health`)).ok) {
+        serverReady = true;
+        break;
+      }
     } catch {}
     await new Promise(resolve => setTimeout(resolve, 250));
   }
+  assert(serverReady, 'first-run browser server starts on the configured port');
   const browser = await chromium.launch({ headless: true });
   try {
     const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
@@ -68,5 +74,11 @@ main().catch(error => {
   console.error(error instanceof Error ? error.message : String(error));
   process.exitCode = 1;
 }).finally(() => {
-  server?.kill();
+  if (server?.pid) {
+    try {
+      process.kill(-server.pid, 'SIGTERM');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
+    }
+  }
 });
