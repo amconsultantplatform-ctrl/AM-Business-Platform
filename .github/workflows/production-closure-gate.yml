@@ -1,0 +1,89 @@
+name: Production Closure Gate
+
+on:
+  push:
+    branches: [main, "production-closure/**"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: production-closure-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  closure-gate:
+    name: ERP Production Closure Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+      - name: Full regression
+        run: npm test
+
+      - name: P0 route controls
+        run: npm run test:p0-controls
+
+      - name: P0 transaction boundary
+        run: npm run test:p0-boundary
+
+      - name: Product reconciliation
+        run: npm run test:product-reconciliation
+
+      - name: Invoice HTTP lifecycle
+        run: npm run test:invoice-http
+
+      - name: Commercial E2E
+        run: npm run test:commercial-e2e
+
+      - name: Real exports
+        run: npm run test:real-exports
+
+      - name: First-run API verification
+        run: npm run test:first-run
+
+      - name: Fiscal year closing
+        run: npm run test:fiscal-year-closing
+
+      - name: Final accounting certification
+        run: npm run test:final-accounting-certification
+
+      - name: Final full-system certification
+        run: npm run test:final-full-system-certification
+
+      - name: Financial localization and costing
+        run: npm run test:financial-localization-costing
+
+      - name: Browser acceptance
+        run: npx playwright install --with-deps chromium && npm run test:first-run-browser && npm run test:browser-acceptance
+
+      - name: Dependency security audit
+        run: npm audit --audit-level=high
+
+      - name: Git diff check
+        run: git diff --check
+
+      - name: Closure summary
+        if: always()
+        run: |
+          echo "Production Closure Gate finished."
+          echo "Do not treat repository certification markdown as proof by itself."
+          echo "A production sign-off requires the underlying implementation, runtime evidence, and re-audit to agree."
