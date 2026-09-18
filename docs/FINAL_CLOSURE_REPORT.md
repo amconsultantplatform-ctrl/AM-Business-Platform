@@ -25,13 +25,16 @@ cores; no parallel accounting or inventory core was introduced.
 | Type safety | `npm run lint` | PASS |
 | Full phase regression | `npm test` | PASS |
 | Route controls | `npm run test:p0-controls` | PASS |
-| Transaction boundary | `npm run test:p0-boundary` | PASS |
+| Transaction boundary | `npm run test:p0-boundary` | PASS — durable concurrent idempotency, restart persistence, and manufacturing rollback |
+| Reconciliation runtime | `npm run test:product-reconciliation` | PASS — scoped persisted sources and explicit missing-source exceptions |
 | Production first run | `npm run test:production-first-run-closure` | PASS |
 | Commercial flow | `npm run test:commercial-e2e` | PASS |
 | Real exports | `npm run test:real-exports` | PASS |
 | Backup and restore | `npm run test:backup-restore` | PASS |
 | Browser first run | `npm run test:first-run-browser` | PASS |
 | Browser matrix | `npm run test:browser-acceptance` | PASS |
+| Completed-onboarding deep-link reload | `npm run test:deep-link-reload-browser` | PASS |
+| Production-equivalent runtime | `npm run test:production-equivalent-certification` | PASS |
 | Final certification | `npm run test:final-full-system-certification` | PASS |
 | Dependency security | `npm audit --audit-level=high` | 0 vulnerabilities |
 
@@ -44,9 +47,8 @@ checksum rejection for a tampered backup without replacing current data.
 
 ## Delivery status
 
-Repository-level gates and negative paths passed except for the explicitly
-unverified direct deep-link reload proof and the two P0 boundary proofs
-reported as `NOT AVAILABLE`. GitHub `Production Certification` and
-`Production Closure Gate` also passed for the final commit. Target-environment
-operational sign-off remains an external operational action; this report does
-not claim that sign-off occurred.
+Repository-level targeted gates and negative paths passed, including durable
+transaction boundaries, source-aware reconciliation, production-equivalent
+runtime behavior, and completed-onboarding deep-link reload. Target-environment
+operational sign-off and external provider evidence remain outside this
+repository; this report does not claim those actions occurred.
