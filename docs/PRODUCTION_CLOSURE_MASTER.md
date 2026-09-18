@@ -45,7 +45,7 @@ production gate; the supplemental workflow
 | Deep-link reload persistence | PASS | `npm run test:deep-link-reload-browser` completes onboarding, authenticates, opens `?module=accounting`, hard-refreshes, and verifies session/module/company context |
 | Production-equivalent runtime | PASS | `npm run test:production-equivalent-certification` uses real SQLite, HTTP APIs, auth, canonical GL, and restart persistence with demo flags disabled |
 | Dependency security | PASS | `npm audit --audit-level=high` reports 0 vulnerabilities |
-| Deployment CI execution | PASS | GitHub `Production Certification` and `Production Closure Gate` passed for commit `3a26719bd9b4f2025881b06681a7d7d9a1819f60` |
+| Deployment CI execution | PASS | GitHub `Production Certification` and `Production Closure Gate` passed for commit `b4d9d865682f87d7a699fbf2bb21115d57dad54f` |
 
 ## Important current audit observations
 
@@ -78,6 +78,14 @@ closed-period posting, unbalanced journals, negative stock, tampered restore
 payloads, and unauthorized payroll/commission actions. Browser startup, completed-onboarding deep-link reload, production-equivalent
 runtime certification, and full-system certification passed after process-group
 cleanup and isolated browser ports were added to the fixtures.
+
+## Final Gate evidence
+
+The one requested Final Gate completed with `FINAL_GATE_FAILURES=0`.
+`npm run lint`, build, regression, all listed P0/P1/P2 certification commands,
+browser checks, backup/restore, dependency audit, and `git diff --check` all
+passed. The final gate output included `FINAL RESULT: PASS` for accounting and
+full-system certification.
 
 ## Final status
 

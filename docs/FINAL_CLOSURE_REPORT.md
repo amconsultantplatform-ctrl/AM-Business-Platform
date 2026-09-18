@@ -52,3 +52,7 @@ transaction boundaries, source-aware reconciliation, production-equivalent
 runtime behavior, and completed-onboarding deep-link reload. Target-environment
 operational sign-off and external provider evidence remain outside this
 repository; this report does not claim those actions occurred.
+
+The single requested Final Gate completed with `FINAL_GATE_FAILURES=0`,
+including lint, build, regression, all required certification commands,
+browser checks, backup/restore, dependency audit, and diff validation.
