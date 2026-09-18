@@ -20,6 +20,7 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: npm run lint
+      - run: npm run build
       - run: npm test
       - run: npm run test:backup-restore
       - run: npm run test:final-full-system-certification
