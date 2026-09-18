@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const suites = [
+  ['Production-equivalent Runtime Certification', 'scripts/verify_production_equivalent_certification.ts'],
   ['Accounting and Annual Closing', 'scripts/verify_final_accounting_certification.ts'],
   ['Full Runtime HR Payroll Commission RBAC', 'scripts/verify_final_full_system_certification.ts']
 ] as const;

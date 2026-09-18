@@ -23,6 +23,7 @@
     "test:first-run-browser": "tsx scripts/verify_first_run_browser.ts",
     "test:first-run": "tsx scripts/verify_first_run_setup.ts",
     "test:production-first-run-closure": "tsx scripts/verify_production_first_run_closure.ts",
+    "test:production-equivalent-certification": "tsx scripts/verify_production_equivalent_certification.ts",
     "test:financial-localization-costing": "tsx scripts/verify_financial_localization_costing.ts",
     "test:fiscal-year-closing": "tsx scripts/verify_fiscal_year_closing.ts",
     "test:final-accounting-certification": "tsx scripts/verify_final_accounting_certification.ts",
