@@ -28,69 +28,67 @@ The GitHub Actions workflow at
 production gate; the supplemental workflow
 `.github/workflows/production-certification.yml` covers the Issue #1 commands.
 
-## Current evidence
+## Current evidence after re-audit
 
-| Gate | Status | Evidence |
+| Gate | Status | Evidence / audit finding |
 |---|---|---|
 | Type safety | PASS | `npm run lint` |
 | Core phase regression | PASS | `npm test` |
 | P0 route controls | PASS | `npm run test:p0-controls` |
-| P0 transaction boundary | PASS | `npm run test:p0-boundary` proves concurrent durable idempotency, restart persistence, and SQLite rollback across manufacturing, inventory, WIP financial event, and audit |
-| Reconciliation runtime | PASS | `npm run test:product-reconciliation` proves tenant/company/period scope, persisted journal/opening sources, and explicit missing-source `PENDING` behavior |
-| Production first run | PASS | `npm run test:production-first-run-closure` |
+| P0 transaction boundary | PARTIAL | Test now uses SQLite persistence, but the concurrency proof reuses one DatabaseSync instance with synchronous transaction bodies; this does not prove an independent concurrent-writer race. Manufacturing rollback persists DB writes transactionally, but the ManufacturingInventoryContext mutation is in memory and is not itself transaction-coupled. |
+| Reconciliation runtime | PARTIAL | Silent zero fallback was removed and missing-source PENDING behavior added, but one aggregate opening value is reused across modules; opening selection uses period <= requested period; undated/missing-scope records may be included; movements are not consistently derived from canonical subledger opening-to-closing semantics. |
+| Production first run | PASS | `npm run test:production-first-run-closure` runs with demo flags disabled and real SQLite persistence. |
 | Commercial operational E2E | PASS | `npm run test:commercial-e2e` |
 | Real exports | PASS | `npm run test:real-exports` |
 | Backup/restore and tamper rejection | PASS | `npm run test:backup-restore` |
 | Browser acceptance | PASS | `npm run test:first-run-browser`, `npm run test:browser-acceptance` |
-| Deep-link reload persistence | PASS | `npm run test:deep-link-reload-browser` completes onboarding, authenticates, opens `?module=accounting`, hard-refreshes, and verifies session/module/company context |
-| Production-equivalent runtime | PASS | `npm run test:production-equivalent-certification` uses real SQLite, HTTP APIs, auth, canonical GL, and restart persistence with demo flags disabled |
-| Dependency security | PASS | `npm audit --audit-level=high` reports 0 vulnerabilities |
-| Deployment CI execution | PASS | GitHub `Production Certification` and `Production Closure Gate` passed for commit `b4d9d865682f87d7a699fbf2bb21115d57dad54f` |
+| Deep-link reload persistence | PARTIAL | URL/auth/module persistence is tested after completed onboarding, but active company/tenant context is not explicitly asserted before and after reload. |
+| Production-equivalent runtime | PARTIAL | Current wrapper runs the production first-run closure with demo flags disabled; its evidence text is broader than the assertions actually implemented. |
+| Dependency security | PASS | `npm audit --audit-level=high` previously reported 0 vulnerabilities. |
+| Deployment CI execution | UNVERIFIED FOR CURRENT HEAD | Prior successful Actions evidence was tied to earlier commit `b4d9d865...`; current HEAD must have a verified successful run/check before claiming current-HEAD CI certification. |
 
-## Important current audit observations
+## Open blockers
 
-These remain open until proven closed with runtime evidence:
+1. Prove true concurrent durable uniqueness with independent workers/processes or
+   independent database connections against shared SQLite state, including
+   duplicate prevention and retry idempotency.
 
-- Reconciliation and external WPS, bank-feed, and statutory-provider sources
-  must never be represented as successful without real provider evidence.
-- External WPS, bank-feed, and statutory-provider sources remain outside this
-  repository and are not represented as successful without provider evidence.
-- Target-environment operational sign-off remains an external deployment action.
+2. Couple manufacturing/inventory/WIP/financial-event/audit state changes to one
+   real transaction boundary, and prove rollback of both persisted state and
+   domain state after injected failure.
+
+3. Correct reconciliation accounting semantics:
+   - opening balance at the start of the requested period, not cumulative
+     `period <= requested period`;
+   - strict tenant/company scope;
+   - canonical period-scoped subledger movement;
+   - module-specific opening/movement/closing calculations;
+   - explicit missing/invalid source states.
+
+4. Align production-equivalent certification claims with actual assertions and
+   evidence.
+
+5. Add explicit company/tenant context verification to completed-onboarding
+   deep-link hard-refresh proof.
+
+6. Verify GitHub Actions for the exact final HEAD after the fixes above.
+
+External WPS, bank-feed, statutory-provider evidence, and target-environment
+operational sign-off remain external requirements and must not be represented
+as repository PASS without external evidence.
 
 ## Fresh re-audit result
 
-The final local re-audit passed the available repository gates:
-
-```text
-npm run lint
-npm test
-npm run test:p0-controls
-npm run test:p0-boundary
-npm run test:backup-restore
-npm run test:deep-link-reload-browser
-npm run test:production-equivalent-certification
-npm run test:final-full-system-certification
-npm audit --audit-level=high
-```
-
-Negative paths were observed for unauthenticated access, cross-company scope,
-closed-period posting, unbalanced journals, negative stock, tampered restore
-payloads, and unauthorized payroll/commission actions. Browser startup, completed-onboarding deep-link reload, production-equivalent
-runtime certification, and full-system certification passed after process-group
-cleanup and isolated browser ports were added to the fixtures.
-
-## Final Gate evidence
-
-The one requested Final Gate completed with `FINAL_GATE_FAILURES=0`.
-`npm run lint`, build, regression, all listed P0/P1/P2 certification commands,
-browser checks, backup/restore, dependency audit, and `git diff --check` all
-passed. The final gate output included `FINAL RESULT: PASS` for accounting and
-full-system certification.
+Repository-level tests have demonstrated substantial progress, but the latest
+source-level re-audit found the remaining proof/semantic gaps above. Therefore
+the repository is not yet eligible for production closure.
 
 ## Final status
 
-The repository is **not marked `PRODUCTION CLOSED`** until target-environment
-operational sign-off and external provider evidence are completed.
+**PRODUCTION CLOSED: NO**
+
+Issue #2 must remain blocked until all P0 blockers above are proven and a final
+fresh gate/re-audit agrees with the implementation.
 
 ## Final deliverables
 
