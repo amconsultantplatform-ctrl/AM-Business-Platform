@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { spawn, type ChildProcess } from 'node:child_process';
 
-const port = Number(process.env.FIRST_RUN_BROWSER_PORT || 3361);
+const port = Number(process.env.FIRST_RUN_BROWSER_PORT || (3361 + (process.pid % 1000)));
 const baseUrl = `http://127.0.0.1:${port}`;
 const databasePath = path.resolve(process.cwd(), 'data/first-run-browser.db');
 const evidencePath = path.resolve(process.cwd(), 'data/browser-acceptance/first-run-welcome.png');
