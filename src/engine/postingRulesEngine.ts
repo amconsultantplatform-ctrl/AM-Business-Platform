@@ -69,7 +69,13 @@ const DOCUMENT_TYPE_ALIASES: Record<string, string> = {
   'GOODS_RECEIPT_POSTED': 'StockReceipt',
   'StockIssue': 'StockIssue',
   'GoodsIssueNote': 'StockIssue',
-  'GOODS_ISSUE_POSTED': 'StockIssue'
+  'GOODS_ISSUE_POSTED': 'StockIssue',
+
+  // Manufacturing
+  'ProductionGoodsIssue': 'ProductionGoodsIssue',
+  'PRODUCTION_GOODS_ISSUE': 'ProductionGoodsIssue',
+  'MANUFACTURING_GOODS_ISSUE': 'ProductionGoodsIssue',
+  'GoodsIssueToWorkOrder': 'ProductionGoodsIssue'
 };
 
 export class PostingRulesEngine {

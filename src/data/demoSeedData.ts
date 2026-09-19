@@ -308,7 +308,7 @@ export const INITIAL_POSTING_RULES: PostingRule[] = [
     documentType: 'ProductionGoodsIssue',
     name: 'Manufacturing WIP Goods Issue Posting Rule',
     debitAccountCode: '1300',
-    creditAccountCode: '1030',
+    creditAccountCode: '1200',
     isActive: true
   },
   {
@@ -420,6 +420,8 @@ export const INITIAL_ACCOUNTS: Account[] = [
   { id: 'acc-1030', tenantId: 'ten-001', companyId: 'comp-001', code: '1030', name: 'Merchandise Inventory', nameAr: 'مخزون البضائع للبيع', category: 'Asset', accountType: 'Inventory', balance: 920000, currency: 'SAR', isActive: true, level: 1 },
   { id: 'acc-1040', tenantId: 'ten-001', companyId: 'comp-001', code: '1040', name: 'Input VAT Recoverable', nameAr: 'ضريبة القيمة المضافة المدخلة القابلة للاسترداد', category: 'Asset', accountType: 'TaxReceivable', balance: 45000, currency: 'SAR', isActive: true, level: 1 },
   { id: 'acc-1050', tenantId: 'ten-001', companyId: 'comp-001', code: '1050', name: 'Fixed Assets - IT Equipment', nameAr: 'الأصول الثابتة - أجهزة وتقنية', category: 'Asset', accountType: 'Property', balance: 340000, currency: 'SAR', isActive: true, level: 1 },
+  { id: 'acc-1200', tenantId: 'ten-001', companyId: 'comp-001', code: '1200', name: 'Raw Materials Inventory', nameAr: 'مخزون المواد الأولية', category: 'Asset', accountType: 'Inventory', balance: 0, currency: 'SAR', isActive: true, level: 1 },
+  { id: 'acc-1300', tenantId: 'ten-001', companyId: 'comp-001', code: '1300', name: 'Work in Process (WIP)', nameAr: 'أعمال تحت التنفيذ', category: 'Asset', accountType: 'Inventory', balance: 0, currency: 'SAR', isActive: true, level: 1 },
 
   // Liabilities
   { id: 'acc-2010', tenantId: 'ten-001', companyId: 'comp-001', code: '2010', name: 'Accounts Payable (AP)', nameAr: 'الموردون وحسابات الدفع', category: 'Liability', accountType: 'Payable', balance: 410000, currency: 'SAR', isActive: true, level: 1 },

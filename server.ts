@@ -13947,11 +13947,6 @@ Keep your response clear, structured with key bullet points, numbers, and recomm
         // Engines and posting helpers use these module collections. Point them
         // at detached state for the duration of the operation; the coordinator
         // publishes it only after the database transaction commits.
-        const liveState = {
-          manufacturingWorkOrders, inventory, warehouses, binLocations, stockQuants,
-          batchLots, serialNumbers, stockLedgerEntries, stockMovements,
-          manufacturingGoodsIssues, financialEvents, journalEntries, auditLogs
-        };
         manufacturingWorkOrders = staged.manufacturingWorkOrders as typeof manufacturingWorkOrders;
         inventory = staged.inventory;
         warehouses = staged.warehouses;
@@ -13965,7 +13960,6 @@ Keep your response clear, structured with key bullet points, numbers, and recomm
         financialEvents = staged.financialEvents;
         journalEntries = staged.journalEntries;
         auditLogs = staged.auditLogs;
-        try {
         const wo = manufacturingWorkOrders.find(w => w.id === req.params.id);
         if (!wo) throw new Error('Work Order not found');
         const { issueType, items } = req.body;
@@ -14064,21 +14058,6 @@ Keep your response clear, structured with key bullet points, numbers, and recomm
           throw new Error('Injected manufacturing transaction failure');
         }
         return { updatedWorkOrder, goodsIssueRecord: durableGoodsIssueRecord, financialEvent, journalEntryId: journalEntry?.id };
-        } finally {
-          manufacturingWorkOrders = liveState.manufacturingWorkOrders;
-          inventory = liveState.inventory;
-          warehouses = liveState.warehouses;
-          binLocations = liveState.binLocations;
-          stockQuants = liveState.stockQuants;
-          batchLots = liveState.batchLots;
-          serialNumbers = liveState.serialNumbers;
-          stockLedgerEntries = liveState.stockLedgerEntries;
-          stockMovements = liveState.stockMovements;
-          manufacturingGoodsIssues = liveState.manufacturingGoodsIssues;
-          financialEvents = liveState.financialEvents;
-          journalEntries = liveState.journalEntries;
-          auditLogs = liveState.auditLogs;
-        }
       });
       res.json({ success: true, ...result });
     } catch (err: any) {
