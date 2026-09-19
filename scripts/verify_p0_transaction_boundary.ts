@@ -148,7 +148,7 @@ async function testManufacturingAtomicRollback(): Promise<void> {
   const db = PilotDatabaseService.createIsolated(rollbackDatabasePath);
   const context = createManufacturingContext();
   const contextBefore = JSON.stringify(context);
-  const transactionalContext = structuredClone(context);
+  const contextSnapshot = structuredClone(context);
   const workOrder: ProductionWorkOrder = {
     id: 'wo-boundary-001',
     ...scope,
@@ -175,6 +175,7 @@ async function testManufacturingAtomicRollback(): Promise<void> {
   };
 
   let failed = false;
+  let mutatedBeforeRollback = false;
   try {
     db.transaction(() => {
       const result = ManufacturingEngine.issueMaterialsToWorkOrder({
@@ -182,14 +183,21 @@ async function testManufacturingAtomicRollback(): Promise<void> {
         issuedBy: 'boundary-test',
         issueType: 'MANUAL_STAGING',
         items: [{ componentSku: 'COMP-BOUNDARY', quantity: 1 }],
-        inventoryContext: transactionalContext
+        inventoryContext: context
       });
       db.saveEntity('manufacturingWorkOrders', result.updatedWorkOrder, scope.tenantId, scope.companyId);
       db.saveEntity('stockMovements', result.inventoryMovements?.[0]?.stockLedgerEntry, scope.tenantId, scope.companyId);
       db.saveEntity('financialEvents', { id: result.goodsIssueRecord.financialEventId, ...scope, ...result.financialEvent.payload }, scope.tenantId, scope.companyId);
       db.saveEntity('glJournals', { id: result.goodsIssueRecord.financialEventId, ...scope, sourceDocumentId: result.goodsIssueRecord.issueNumber, debit: 10, credit: 10 }, scope.tenantId, scope.companyId);
       db.saveEntity('manufacturingAudit', { id: 'audit-boundary-001', ...scope, workOrderId: workOrder.id, action: 'MATERIAL_ISSUE' }, scope.tenantId, scope.companyId);
+      mutatedBeforeRollback = JSON.stringify(context) !== contextBefore;
       throw new Error('Injected failure after manufacturing, inventory, WIP, financial event, and audit writes');
+    }, {
+      onRollback: () => {
+        context.items.splice(0, context.items.length, ...contextSnapshot.items);
+        context.quants.splice(0, context.quants.length, ...contextSnapshot.quants);
+        context.stockLedgerEntries.splice(0, context.stockLedgerEntries.length, ...contextSnapshot.stockLedgerEntries);
+      }
     });
   } catch {
     failed = true;
@@ -201,7 +209,8 @@ async function testManufacturingAtomicRollback(): Promise<void> {
   assert(db.listEntities('glJournals', scope.tenantId, scope.companyId).length === 0, 'GL journal rolls back');
   assert(db.listEntities('manufacturingAudit', scope.tenantId, scope.companyId).length === 0, 'manufacturing audit rolls back');
   assert(JSON.stringify(context) === contextBefore, 'domain inventory context remains unchanged when the transaction rolls back');
-  assert(JSON.stringify(transactionalContext) !== contextBefore, 'failure occurs after the transactional manufacturing context has mutated');
+  assert(mutatedBeforeRollback, 'failure occurs after the transactional manufacturing context has mutated');
+  assert(JSON.stringify(contextSnapshot) === contextBefore && JSON.stringify(context) === contextBefore, 'transaction coordinator restores domain state after rollback');
 
   const retryContext = structuredClone(context);
   const retryOperation = {

@@ -38,7 +38,7 @@ inventory, WIP, audit, queue, and GL writes.
 
 | Operation | Current persisted state | Inventory | WIP | Financial event | GL | Audit | Boundary | Retry / idempotency |
 |---|---|---|---|---|---|---|---|---|
-| Goods Issue | Work-order copy and inventory arrays are mutated by the caller | Direct `InventoryExecutionEngine` mutation and ledger append | Work-order result increases material actual cost and WIP | Payload is returned; it is not persisted by this method | Not in the method; may be queued later | Not in the method | No shared transaction context | Inventory rollback exists for a failed multi-line issue; cross-process duplicate proof is unavailable |
+| Goods Issue | Production endpoint executes the work-order update and inventory mutation inside `PilotDatabaseService.transaction` with rollback state coordination | Direct `InventoryExecutionEngine` mutation and durable stock-ledger append | Work-order result increases material actual cost and WIP | `FinancialEventEngine` persists the production goods-issue event with the durable business key | Canonical GL journal is posted through the manufacturing posting rule | Durable audit record is written in the same transaction | Shared SQLite transaction with rollback coordinator | Durable business-key claim accepts one execution; retries return the committed result |
 | Production Confirmation | Returned work-order copy and confirmation | None | Returned WIP/cost summary increases | No financial event is emitted by `confirmOperation` | None | None | Pure in-memory result | No persistence or idempotency boundary |
 | Finished Goods Receipt | Work-order copy and inventory arrays are mutated by the caller | Direct receipt mutation and ledger append | Returned WIP decreases | Payload is returned; it is not persisted by this method | Not in the method; may be queued later | Not in the method | No shared transaction context | Inventory rollback exists for movement failure; concurrent duplicate proof is unavailable |
 | Work-order Settlement | Returned work-order copy is marked closed and sealed | None | Returned WIP is set to zero | Payload is returned; it is not persisted by this method | Not in the method | Hash is created, but audit persistence is external | No shared transaction context | No durable idempotency key or atomic commit |
@@ -84,12 +84,8 @@ periods on configured routes.
 
 ### Costs
 
-- Manufacturing cannot currently claim one commit spanning inventory, WIP,
-  financial event, GL, and audit.
-- Asynchronous GL processing means business completion and accounting
-  completion are different states.
-- Concurrent duplicate protection cannot be certified from the current
-  collection-based implementation.
+- Finished-goods receipt and work-order settlement remain separate workflows;
+  this closure change covers the manufacturing goods-issue boundary only.
 
 ## Remaining Risk
 
@@ -106,21 +102,9 @@ periods on configured routes.
 
 ## Migration Boundary
 
-The smallest credible P0 migration is:
-
-1. Introduce a real repository transaction context (database transaction or
-   equivalent durable unit-of-work), not an interface-only wrapper.
-2. Make the context available to `InventoryExecutionEngine` and the
-   manufacturing aggregate without creating a second inventory store.
-3. Persist a complete financial event plus unique idempotency key and accepted
-   outbox record before returning a non-final business result.
-4. Make the outbox processor idempotent at the GL posting boundary and expose
-   `PENDING`, `PROCESSED`, and `FAILED_RETRYABLE` states.
-5. Add failure-injection tests against the actual handlers after the durable
-   boundary exists.
-
-Until those steps exist, the status is:
-
-> **P0 BLOCKED BY ARCHITECTURE** — inventory, WIP, financial event, GL, and
-> audit do not share one actual transaction boundary.
-
+The manufacturing goods-issue migration is implemented through the existing
+SQLite repository transaction, durable business-key claim, canonical financial
+event/GL posting, and audit persistence. The targeted boundary proof injects a
+failure after downstream effects and verifies automatic rollback without test
+state restoration. Finished-goods receipt and settlement remain separate
+follow-up workflows.

@@ -302,6 +302,16 @@ export const INITIAL_POSTING_RULES: PostingRule[] = [
     isActive: true
   },
   {
+    id: 'pr-003-mfg',
+    tenantId: 'ten-001',
+    companyId: 'comp-001',
+    documentType: 'ProductionGoodsIssue',
+    name: 'Manufacturing WIP Goods Issue Posting Rule',
+    debitAccountCode: '1300',
+    creditAccountCode: '1030',
+    isActive: true
+  },
+  {
     id: 'pr-004',
     tenantId: 'ten-001',
     companyId: 'comp-001',

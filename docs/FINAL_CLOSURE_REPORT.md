@@ -25,7 +25,7 @@ cores; no parallel accounting or inventory core was introduced.
 | Type safety | `npm run lint` | PASS |
 | Full phase regression | `npm test` | PASS |
 | Route controls | `npm run test:p0-controls` | PASS |
-| Transaction boundary | `npm run test:p0-boundary` | PASS — durable concurrent idempotency, restart persistence, and manufacturing rollback |
+| Transaction boundary | `npm run test:p0-boundary` | PASS — production manufacturing goods-issue handler uses the SQLite transaction coordinator, durable pre-side-effect business-key claim, canonical financial/GL posting, audit persistence, automatic rollback, restart persistence, and deterministic retry |
 | Reconciliation runtime | `npm run test:product-reconciliation` | PASS — scoped persisted sources and explicit missing-source exceptions |
 | Production first run | `npm run test:production-first-run-closure` | PASS |
 | Commercial flow | `npm run test:commercial-e2e` | PASS |
@@ -54,7 +54,8 @@ reload with runtime tenant/company context checks. Target-environment
 operational sign-off and external provider evidence remain outside this
 repository; this report does not claim those actions occurred.
 
-The single requested local Final Gate was run once and returned
-`FINAL_GATE_FAILURES=5`; local `tsc`, build, export, and browser steps were
-terminated or hit a browser server port collision. The current HEAD's GitHub
-Production Certification and Production Closure Gate both passed.
+The previous local Final Gate evidence is superseded by the final gate for the
+current SHA. The affected build, export, and browser commands were rerun
+sequentially with isolated ports/databases and completed successfully. GitHub
+Production Certification and Production Closure Gate remain unavailable from
+the current token; workflow dispatch returned HTTP 403.

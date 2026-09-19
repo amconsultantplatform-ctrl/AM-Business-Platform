@@ -13936,32 +13936,118 @@ Keep your response clear, structured with key bullet points, numbers, and recomm
 
   app.post('/api/v1/mfg/work-orders/:id/issue-materials', SecurityEngine.requireRole('Inventory Manager', 'Tenant Admin'), (req: Request, res: Response) => {
     try {
-      const wo = manufacturingWorkOrders.find(w => w.id === req.params.id);
-      if (!wo) throw new Error('Work Order not found');
-      const { issueType, items } = req.body;
-      const issuedBy = (req as any).auth?.sub;
-      const { updatedWorkOrder, goodsIssueRecord, financialEvent } = ManufacturingEngine.issueMaterialsToWorkOrder({
-        workOrder: wo,
-        issuedBy,
-        issueType,
-        items,
-        inventoryContext: {
-          items: inventory,
-          warehouses,
-          bins: binLocations,
-          quants: stockQuants,
-          batchLots,
-          serials: serialNumbers,
-          stockLedgerEntries,
-          config: inventoryConfig,
-          userName: (req as any).auth?.name || issuedBy,
-          userRole: (req as any).auth?.role || 'Inventory Manager'
+      const state: any[][] = [
+        manufacturingWorkOrders, inventory, warehouses, binLocations, stockQuants,
+        batchLots, serialNumbers, stockLedgerEntries, stockMovements,
+        manufacturingGoodsIssues, financialEvents, journalEntries, auditLogs
+      ];
+      const snapshots = state.map(collection => structuredClone(collection));
+      const result = pilotDb.transaction(() => {
+        const wo = manufacturingWorkOrders.find(w => w.id === req.params.id);
+        if (!wo) throw new Error('Work Order not found');
+        const { issueType, items } = req.body;
+        const issuedBy = (req as any).auth?.sub;
+        const idempotencyKey = String(req.body.idempotencyKey || req.body.sourceDocumentId || `mfg-issue-${wo.id}`);
+        if (!pilotDb.claimIdempotentOperation({
+          tenantId: wo.tenantId,
+          companyId: wo.companyId,
+          operationType: 'MANUFACTURING_GOODS_ISSUE',
+          sourceDocumentId: wo.id,
+          idempotencyKey,
+          resultCollection: 'manufacturingGoodsIssues',
+          resultId: wo.id
+        })) {
+          const existing = manufacturingGoodsIssues.find(issue => (issue as GoodsIssueRecord & { idempotencyKey?: string }).idempotencyKey === idempotencyKey);
+          if (!existing) throw new Error('Idempotency record exists without its committed manufacturing result');
+          return { updatedWorkOrder: wo, goodsIssueRecord: existing, financialEvent: null, journalEntryId: (existing as any).journalEntryId };
+        }
+        const { updatedWorkOrder, goodsIssueRecord, financialEvent, inventoryMovements } = ManufacturingEngine.issueMaterialsToWorkOrder({
+          workOrder: wo,
+          issuedBy,
+          issueType,
+          items,
+          inventoryContext: {
+            items: inventory,
+            warehouses,
+            bins: binLocations,
+            quants: stockQuants,
+            batchLots,
+            serials: serialNumbers,
+            stockLedgerEntries,
+            config: inventoryConfig,
+            userName: (req as any).auth?.name || issuedBy,
+            userRole: (req as any).auth?.role || 'Inventory Manager'
+          }
+        });
+        const idx = manufacturingWorkOrders.findIndex(w => w.id === req.params.id);
+        manufacturingWorkOrders[idx] = updatedWorkOrder;
+        const durableGoodsIssueRecord = { ...goodsIssueRecord, idempotencyKey };
+        manufacturingGoodsIssues.push(durableGoodsIssueRecord);
+        for (const movement of inventoryMovements || []) {
+          stockMovements.unshift({
+            id: movement.stockLedgerEntry.id,
+            tenantId: movement.stockLedgerEntry.tenantId,
+            companyId: movement.stockLedgerEntry.companyId,
+            branchId: movement.stockLedgerEntry.branchId,
+            movementNumber: movement.stockLedgerEntry.movementNumber,
+            date: movement.stockLedgerEntry.timestamp.slice(0, 10),
+            itemSku: movement.stockLedgerEntry.itemSku,
+            itemName: movement.stockLedgerEntry.itemName,
+            warehouseId: movement.stockLedgerEntry.warehouseId,
+            warehouseName: movement.stockLedgerEntry.warehouseName,
+            movementType: 'Issue',
+            quantity: movement.stockLedgerEntry.quantity,
+            unitCost: movement.stockLedgerEntry.unitCost,
+            totalCost: movement.stockLedgerEntry.totalCost,
+            reference: movement.stockLedgerEntry.reference,
+            status: 'Posted',
+            performedBy: movement.stockLedgerEntry.userName,
+            createdAt: movement.stockLedgerEntry.timestamp
+          } as StockMovement);
+        }
+        const journalEntry = processFinancialEvent(
+          wo.tenantId,
+          wo.companyId,
+          financialEvent.eventType as FinancialEvent['eventType'],
+          'ProductionGoodsIssue',
+          financialEvent.payload.eventId,
+          financialEvent.payload.issueNumber,
+          financialEvent.payload.amount,
+          0,
+          'SAR',
+          undefined,
+          undefined,
+          `Manufacturing goods issue ${financialEvent.payload.issueNumber}`,
+          issuedBy,
+          undefined,
+          resolveFinancialPeriod(new Date().toISOString().split('T')[0], wo.tenantId, wo.companyId),
+          idempotencyKey
+        );
+        (durableGoodsIssueRecord as any).journalEntryId = journalEntry?.id;
+        recordAudit(
+          wo.tenantId,
+          issuedBy,
+          (req as any).auth?.name || issuedBy,
+          (req as any).auth?.role || 'Inventory Manager',
+          'POST',
+          'ManufacturingGoodsIssue',
+          durableGoodsIssueRecord.id,
+          `Manufacturing goods issue ${financialEvent.payload.issueNumber} committed atomically`,
+          financialEvent.payload.issueNumber
+        );
+        if (req.body.injectFailureAfterSideEffects === true) {
+          throw new Error('Injected manufacturing transaction failure');
+        }
+        pilotDb.saveEntity('manufacturingGoodsIssues', durableGoodsIssueRecord, wo.tenantId, wo.companyId);
+        return { updatedWorkOrder, goodsIssueRecord: durableGoodsIssueRecord, financialEvent, journalEntryId: journalEntry?.id };
+      }, {
+        onRollback: () => {
+          state.forEach((collection, index) => {
+            collection.splice(0, collection.length, ...snapshots[index]);
+          });
         }
       });
-      const idx = manufacturingWorkOrders.findIndex(w => w.id === req.params.id);
-      manufacturingWorkOrders[idx] = updatedWorkOrder;
-      manufacturingGoodsIssues.push(goodsIssueRecord);
-      res.json({ success: true, workOrder: updatedWorkOrder, goodsIssueRecord, financialEvent });
+      res.json({ success: true, ...result });
     } catch (err: any) {
       res.status(400).json({ success: false, error: err.message });
     }

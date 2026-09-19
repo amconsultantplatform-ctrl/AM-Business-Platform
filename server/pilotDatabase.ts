@@ -411,7 +411,10 @@ export class PilotDatabaseService {
     return this.loadCollection<T>(collection);
   }
 
-  public transaction<T>(fn: (db: PilotDatabaseService) => T): T {
+  public transaction<T>(
+    fn: (db: PilotDatabaseService) => T,
+    options?: { onRollback?: () => void }
+  ): T {
     this.db.exec('BEGIN TRANSACTION;');
     try {
       const res = fn(this);
@@ -421,6 +424,7 @@ export class PilotDatabaseService {
       try {
         this.db.exec('ROLLBACK;');
       } catch {}
+      options?.onRollback?.();
       throw err;
     }
   }
