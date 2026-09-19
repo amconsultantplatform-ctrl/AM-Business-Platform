@@ -45,7 +45,7 @@ production gate; the supplemental workflow
 | Deep-link reload persistence | PASS | `npm run test:deep-link-reload-browser` verifies runtime `/auth/me` tenant/company context before and after hard refresh, plus session and module persistence. |
 | Production-equivalent runtime | PASS | `npm run test:production-equivalent-certification` asserts production environment flags, real SQLite/HTTP/auth, invalid posting rejection, canonical GL effects, and restart persistence. |
 | Dependency security | PASS | `npm audit --audit-level=high` previously reported 0 vulnerabilities. |
-| Deployment CI execution | PASS | GitHub `Production Certification` and `Production Closure Gate` both passed for current HEAD `6c367446ed6d0e23d2335d5b77ca1a07f26d34e0`. |
+| Deployment CI execution | PASS | GitHub `Production Certification` and `Production Closure Gate` both passed for current HEAD `021ac415e2d5a55a01a16f90b26acd542cf4d166`. |
 
 ## Open limitations
 
