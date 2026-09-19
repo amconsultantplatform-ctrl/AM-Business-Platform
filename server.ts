@@ -479,6 +479,7 @@ import {
   deletePersistedEntity,
   executeTransaction
 } from './server/persistenceRegistry';
+import { ManufacturingTransactionCoordinator } from './server/manufacturingTransactionCoordinator';
 import { PilotMasterDataImportRow } from './src/types/pilot';
 
 dotenv.config();
@@ -13936,13 +13937,35 @@ Keep your response clear, structured with key bullet points, numbers, and recomm
 
   app.post('/api/v1/mfg/work-orders/:id/issue-materials', SecurityEngine.requireRole('Inventory Manager', 'Tenant Admin'), (req: Request, res: Response) => {
     try {
-      const state: any[][] = [
+      const coordinator = new ManufacturingTransactionCoordinator(pilotDb);
+      const state = {
         manufacturingWorkOrders, inventory, warehouses, binLocations, stockQuants,
         batchLots, serialNumbers, stockLedgerEntries, stockMovements,
         manufacturingGoodsIssues, financialEvents, journalEntries, auditLogs
-      ];
-      const snapshots = state.map(collection => structuredClone(collection));
-      const result = pilotDb.transaction(() => {
+      };
+      const result = coordinator.execute(state, (staged) => {
+        // Engines and posting helpers use these module collections. Point them
+        // at detached state for the duration of the operation; the coordinator
+        // publishes it only after the database transaction commits.
+        const liveState = {
+          manufacturingWorkOrders, inventory, warehouses, binLocations, stockQuants,
+          batchLots, serialNumbers, stockLedgerEntries, stockMovements,
+          manufacturingGoodsIssues, financialEvents, journalEntries, auditLogs
+        };
+        manufacturingWorkOrders = staged.manufacturingWorkOrders as typeof manufacturingWorkOrders;
+        inventory = staged.inventory;
+        warehouses = staged.warehouses;
+        binLocations = staged.binLocations;
+        stockQuants = staged.stockQuants;
+        batchLots = staged.batchLots;
+        serialNumbers = staged.serialNumbers;
+        stockLedgerEntries = staged.stockLedgerEntries;
+        stockMovements = staged.stockMovements;
+        manufacturingGoodsIssues = staged.manufacturingGoodsIssues;
+        financialEvents = staged.financialEvents;
+        journalEntries = staged.journalEntries;
+        auditLogs = staged.auditLogs;
+        try {
         const wo = manufacturingWorkOrders.find(w => w.id === req.params.id);
         if (!wo) throw new Error('Work Order not found');
         const { issueType, items } = req.body;
@@ -13957,7 +13980,9 @@ Keep your response clear, structured with key bullet points, numbers, and recomm
           resultCollection: 'manufacturingGoodsIssues',
           resultId: wo.id
         })) {
-          const existing = manufacturingGoodsIssues.find(issue => (issue as GoodsIssueRecord & { idempotencyKey?: string }).idempotencyKey === idempotencyKey);
+          const existing = manufacturingGoodsIssues.find(issue => (issue as GoodsIssueRecord & { idempotencyKey?: string }).idempotencyKey === idempotencyKey)
+            || pilotDb.listEntities<GoodsIssueRecord>('manufacturingGoodsIssues', wo.tenantId, wo.companyId)
+              .find(issue => (issue as GoodsIssueRecord & { idempotencyKey?: string }).idempotencyKey === idempotencyKey);
           if (!existing) throw new Error('Idempotency record exists without its committed manufacturing result');
           return { updatedWorkOrder: wo, goodsIssueRecord: existing, financialEvent: null, journalEntryId: (existing as any).journalEntryId };
         }
@@ -14038,13 +14063,21 @@ Keep your response clear, structured with key bullet points, numbers, and recomm
         if (req.body.injectFailureAfterSideEffects === true) {
           throw new Error('Injected manufacturing transaction failure');
         }
-        pilotDb.saveEntity('manufacturingGoodsIssues', durableGoodsIssueRecord, wo.tenantId, wo.companyId);
         return { updatedWorkOrder, goodsIssueRecord: durableGoodsIssueRecord, financialEvent, journalEntryId: journalEntry?.id };
-      }, {
-        onRollback: () => {
-          state.forEach((collection, index) => {
-            collection.splice(0, collection.length, ...snapshots[index]);
-          });
+        } finally {
+          manufacturingWorkOrders = liveState.manufacturingWorkOrders;
+          inventory = liveState.inventory;
+          warehouses = liveState.warehouses;
+          binLocations = liveState.binLocations;
+          stockQuants = liveState.stockQuants;
+          batchLots = liveState.batchLots;
+          serialNumbers = liveState.serialNumbers;
+          stockLedgerEntries = liveState.stockLedgerEntries;
+          stockMovements = liveState.stockMovements;
+          manufacturingGoodsIssues = liveState.manufacturingGoodsIssues;
+          financialEvents = liveState.financialEvents;
+          journalEntries = liveState.journalEntries;
+          auditLogs = liveState.auditLogs;
         }
       });
       res.json({ success: true, ...result });
