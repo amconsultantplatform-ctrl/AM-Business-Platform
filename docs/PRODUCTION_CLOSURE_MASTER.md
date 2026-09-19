@@ -64,10 +64,10 @@ as repository PASS without external evidence.
 
 The targeted blocker proofs passed. Build and typecheck now run with explicit
 Node memory limits in `package.json`; isolated exports and browser suites use
-dynamic ports, process-group cleanup, and isolated databases. The one required
-local Final Gate completed with `FINAL_GATE_FAILURES=0` on the implementation
-tree. Exact-SHA GitHub Certification and Closure Gate evidence remains
-unavailable because workflow dispatch returned HTTP 403.
+dynamic ports, process-group cleanup, and isolated databases. The one required local Final Gate completed with `FINAL_GATE_FAILURES=0` on
+commit `bf34fd411e1c3912f17b851cef813914fadcf022`. Exact-SHA GitHub
+Certification and Closure Gate evidence remains unavailable because workflow
+dispatch returned HTTP 403.
 
 ## Final status
 

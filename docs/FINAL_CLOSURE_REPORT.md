@@ -59,3 +59,6 @@ current SHA. The affected build, export, and browser commands were rerun
 sequentially with isolated ports/databases and completed successfully. GitHub
 Production Certification and Production Closure Gate remain unavailable from
 the current token; workflow dispatch returned HTTP 403.
+
+Final local gate evidence: `FINAL_GATE_FAILURES=0` on
+`bf34fd411e1c3912f17b851cef813914fadcf022`.
