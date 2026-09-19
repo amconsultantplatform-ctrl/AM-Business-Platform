@@ -45,7 +45,7 @@ production gate; the supplemental workflow
 | Deep-link reload persistence | PASS | `npm run test:deep-link-reload-browser` verifies completed onboarding, direct module URL, runtime authentication, tenant/company context before and after hard refresh, plus session and module persistence with isolated server cleanup. |
 | Production-equivalent runtime | PASS | `npm run test:production-equivalent-certification` asserts production environment flags, real SQLite/HTTP/auth, invalid posting rejection, canonical GL effects, and restart persistence. |
 | Dependency security | PASS | `npm audit --audit-level=high` previously reported 0 vulnerabilities. |
-| Deployment CI execution | PENDING | Must be rechecked on the exact pushed SHA after these changes; prior evidence for `021ac415e2d5a55a01a16f90b26acd542cf4d166` is stale. |
+| Deployment CI execution | PENDING | No run is available for the pushed SHA; workflow dispatch was rejected with GitHub API 403. Prior evidence for `021ac415e2d5a55a01a16f90b26acd542cf4d166` is stale. |
 
 ## Open limitations
 
@@ -58,8 +58,9 @@ as repository PASS without external evidence.
 The targeted blocker proofs passed. Build and typecheck now run with explicit
 Node memory limits in `package.json`; isolated exports and browser suites use
 dynamic ports, process-group cleanup, and isolated databases. The one required
-local Final Gate has not been rerun yet, by instruction, until exact-SHA CI
-evidence is available.
+local Final Gate completed with `FINAL_GATE_FAILURES=0` on the implementation
+tree. Exact-SHA GitHub Certification and Closure Gate evidence remains
+unavailable because workflow dispatch returned HTTP 403.
 
 ## Final status
 
