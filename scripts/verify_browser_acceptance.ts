@@ -2,13 +2,14 @@ import { chromium, type Browser, type Page } from 'playwright';
 import { spawn, type ChildProcess } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { findAvailablePort, removeDatabaseFiles, stopTestServer } from './test_server';
 
-const port = Number(process.env.BROWSER_ACCEPTANCE_PORT || 3359);
-const baseUrl = `http://127.0.0.1:${port}`;
 const databasePath = path.resolve(process.cwd(), 'data/browser-acceptance.db');
 const evidenceDir = path.resolve(process.cwd(), 'data/browser-acceptance');
 const adminEmail = 'a.mounir369@gmail.com';
 const adminPassword = 'Admin@2026!';
+let port: number;
+let baseUrl: string;
 
 const viewports = [
   { name: 'desktop-1440x900', width: 1440, height: 900 },
@@ -154,9 +155,9 @@ async function verifyLanguage(page: Page, token: string, lang: 'en' | 'ar', view
 }
 
 async function main(): Promise<void> {
-  await fs.rm(databasePath, { force: true });
-  await fs.rm(`${databasePath}-wal`, { force: true });
-  await fs.rm(`${databasePath}-shm`, { force: true });
+  port = await findAvailablePort(process.env.BROWSER_ACCEPTANCE_PORT);
+  baseUrl = `http://127.0.0.1:${port}`;
+  await removeDatabaseFiles(databasePath);
   await fs.rm(evidenceDir, { recursive: true, force: true });
   await fs.mkdir(evidenceDir, { recursive: true });
 
@@ -193,13 +194,8 @@ async function main(): Promise<void> {
     console.log(`PASS: browser acceptance completed for ${viewports.length} viewports, both RTL/LTR languages; evidence=${evidenceDir}`);
   } finally {
     await browser?.close();
-    if (server.pid) {
-      try {
-        process.kill(-server.pid, 'SIGTERM');
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
-      }
-    }
+    await stopTestServer(server);
+    await removeDatabaseFiles(databasePath);
   }
 }
 

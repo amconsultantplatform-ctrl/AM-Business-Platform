@@ -145,6 +145,21 @@ export class PilotDatabaseService {
       CREATE INDEX IF NOT EXISTS idx_pilot_entities_comp ON pilot_entities(collection, company_id);
     `);
 
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS pilot_idempotency (
+        tenant_id TEXT NOT NULL,
+        company_id TEXT NOT NULL,
+        operation_type TEXT NOT NULL,
+        source_document_id TEXT NOT NULL,
+        idempotency_key TEXT NOT NULL,
+        result_collection TEXT NOT NULL,
+        result_id TEXT NOT NULL,
+        accepted_executions INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (tenant_id, company_id, operation_type, source_document_id, idempotency_key)
+      );
+    `);
+
     // Cryptographic Audit Vault Blocks
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS pilot_audit_vault (
@@ -313,6 +328,70 @@ export class PilotDatabaseService {
     const stmt = this.db.prepare('SELECT data FROM pilot_entities WHERE collection = ? AND id = ?');
     const row = stmt.get(collection, id) as { data: string } | undefined;
     return row ? (JSON.parse(row.data) as T) : null;
+  }
+
+  public claimIdempotentOperation(params: {
+    tenantId: string;
+    companyId: string;
+    operationType: string;
+    sourceDocumentId: string;
+    idempotencyKey: string;
+    resultCollection: string;
+    resultId: string;
+  }): boolean {
+    const result = this.db.prepare(`
+      INSERT OR IGNORE INTO pilot_idempotency
+        (tenant_id, company_id, operation_type, source_document_id, idempotency_key,
+         result_collection, result_id, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      params.tenantId,
+      params.companyId,
+      params.operationType,
+      params.sourceDocumentId,
+      params.idempotencyKey,
+      params.resultCollection,
+      params.resultId,
+      new Date().toISOString()
+    ) as { changes?: number | bigint };
+    return Number(result.changes || 0) === 1;
+  }
+
+  public getIdempotencyRecord(params: {
+    tenantId: string;
+    companyId: string;
+    operationType: string;
+    sourceDocumentId: string;
+    idempotencyKey: string;
+  }): { resultCollection: string; resultId: string; acceptedExecutions: number } | null {
+    const row = this.db.prepare(`
+      SELECT result_collection, result_id, accepted_executions
+      FROM pilot_idempotency
+      WHERE tenant_id = ? AND company_id = ? AND operation_type = ?
+        AND source_document_id = ? AND idempotency_key = ?
+    `).get(
+      params.tenantId,
+      params.companyId,
+      params.operationType,
+      params.sourceDocumentId,
+      params.idempotencyKey
+    ) as { result_collection?: string; result_id?: string; accepted_executions?: number | bigint } | undefined;
+    if (!row?.result_collection || !row.result_id) return null;
+    return {
+      resultCollection: row.result_collection,
+      resultId: row.result_id,
+      acceptedExecutions: Number(row.accepted_executions || 0)
+    };
+  }
+
+  public countAcceptedIdempotentExecutions(params: {
+    tenantId: string;
+    companyId: string;
+    operationType: string;
+    sourceDocumentId: string;
+    idempotencyKey: string;
+  }): number {
+    return this.getIdempotencyRecord(params)?.acceptedExecutions || 0;
   }
 
   public queryEntities<T>(collection: string, filter?: { tenantId?: string; companyId?: string }): T[] {

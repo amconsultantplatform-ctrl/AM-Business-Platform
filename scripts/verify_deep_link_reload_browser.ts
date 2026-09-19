@@ -1,10 +1,10 @@
 import { chromium } from 'playwright';
-import fs from 'node:fs/promises';
 import net from 'node:net';
 import path from 'node:path';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { PilotDatabaseService } from '../server/pilotDatabase';
 import { OnboardingMaterializer } from '../src/verticals/onboardingReadinessEvaluator';
+import { removeDatabaseFiles, stopTestServer } from './test_server';
 
 const databasePath = path.resolve(process.cwd(), 'data/deep-link-reload.db');
 const tenantId = 'ten-deep-link';
@@ -33,7 +33,7 @@ async function availablePort(): Promise<number> {
 async function main(): Promise<void> {
   const port = await availablePort();
   const baseUrl = `http://127.0.0.1:${port}`;
-  for (const file of [databasePath, `${databasePath}-wal`, `${databasePath}-shm`]) await fs.rm(file, { force: true });
+  await removeDatabaseFiles(databasePath);
   const db = PilotDatabaseService.createIsolated(databasePath);
   const setup = OnboardingMaterializer.materializeAll({
     tenantId,
@@ -122,8 +122,7 @@ async function main(): Promise<void> {
 main().catch(error => {
   console.error(error instanceof Error ? error.message : String(error));
   process.exitCode = 1;
-}).finally(() => {
-  if (server?.pid) {
-    try { process.kill(-server.pid, 'SIGTERM'); } catch {}
-  }
+}).finally(async () => {
+  await stopTestServer(server);
+  await removeDatabaseFiles(databasePath);
 });

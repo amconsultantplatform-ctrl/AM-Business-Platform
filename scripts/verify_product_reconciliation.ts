@@ -11,12 +11,12 @@ const report = ReconciliationEngine.generateReport({
   period: '2026-09',
   accounts: [],
   openingBalances: [
-    { tenantId: 'ten-001', companyId: 'comp-001', module: 'AR', effectiveDate: '2026-01-01', amount: 0 },
+    { tenantId: 'ten-001', companyId: 'comp-001', module: 'AR', effectiveDate: '2026-01-01', amount: 25 },
     { tenantId: 'ten-001', companyId: 'comp-001', module: 'AP', effectiveDate: '2026-01-01', amount: 0 },
     { tenantId: 'ten-001', companyId: 'comp-001', module: 'INVENTORY', effectiveDate: '2026-01-01', amount: 0 },
     { tenantId: 'ten-001', companyId: 'comp-001', module: 'OPENING_BALANCES', effectiveDate: '2026-01-01', amount: 100 }
   ],
-  financialEvents: [{ tenantId: 'ten-001', companyId: 'comp-001', postingDate: '2026-09-10', amount: 0 }],
+  financialEvents: [{ tenantId: 'ten-001', companyId: 'comp-001', module: 'INVENTORY', postingDate: '2026-09-10', amount: 50 }],
   journalEntries: [
     {
       tenantId: 'ten-001',
@@ -36,7 +36,7 @@ const report = ReconciliationEngine.generateReport({
     { companyId: 'comp-001', postingDate: '2026-09-10', lines: [{ accountCode: '1020', debit: 800, credit: 0 }] },
     { tenantId: 'ten-001', companyId: 'comp-001', lines: [{ accountCode: '1020', debit: 900, credit: 0 }] }
   ],
-  customers: [{ tenantId: 'ten-001', companyId: 'comp-001', postingDate: '2026-09-15', balance: 100 }],
+  customers: [{ tenantId: 'ten-001', companyId: 'comp-001', postingDate: '2026-09-15', balance: 125 }],
   vendors: [{ tenantId: 'ten-001', companyId: 'comp-001', postingDate: '2026-09-15', balance: 80 }],
   inventory: [{ tenantId: 'ten-001', companyId: 'comp-001', postingDate: '2026-09-15', stockQty: 6, costPrice: 10 }],
   fixedAssets: [],
@@ -59,9 +59,13 @@ assert(byModule('BANK').status === 'PENDING', 'bank reconciliation is pending wi
 assert(byModule('PAYROLL').status === 'PENDING', 'payroll is pending without a persisted payroll source');
 assert(byModule('PAYROLL').subledgerBalance === null, 'missing payroll data is not represented as zero');
 assert(byModule('INVENTORY').difference === 10, 'inventory difference is reported without auto-balancing');
-assert(byModule('AR').glBalance === 100, 'company and period isolation exclude unrelated journals');
+assert(byModule('INVENTORY').movements === 50, 'inventory movement uses the explicitly tagged canonical event');
+assert(byModule('INVENTORY').closing === 50, 'inventory closing is opening plus movements plus adjustments');
+assert(byModule('AR').glBalance === 125, 'GL balance includes the scoped opening balance and period journal');
 assert(byModule('AR').movements === 100, 'AR movement uses only the requested period');
-assert(byModule('AR').opening === 0, 'AR opening is module-specific at period start');
+assert(byModule('AR').opening === 25, 'AR opening is module-specific at period start');
+assert(byModule('AR').closing === 125, 'AR closing is opening plus movements plus adjustments');
+assert(byModule('AR').status === 'COMPLETED', 'AR reconciles closing subledger balance to opening plus GL movement');
 assert(byModule('OPENING_BALANCES').status === 'COMPLETED', 'opening balance comes from a persisted accounting source');
 assert(byModule('OPENING_BALANCES').opening === 100, 'opening balance excludes later-period and undated records');
 

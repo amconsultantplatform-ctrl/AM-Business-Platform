@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { spawn, type ChildProcess } from 'node:child_process';
 import net from 'node:net';
+import { removeDatabaseFiles, stopTestServer } from './test_server';
 
 const databasePath = path.resolve(process.cwd(), 'data/first-run-browser.db');
 const evidencePath = path.resolve(process.cwd(), 'data/browser-acceptance/first-run-welcome.png');
@@ -35,9 +36,7 @@ function assert(condition: unknown, message: string): asserts condition {
 async function main(): Promise<void> {
   port = await findAvailablePort();
   baseUrl = `http://127.0.0.1:${port}`;
-  await fs.rm(databasePath, { force: true });
-  await fs.rm(`${databasePath}-wal`, { force: true });
-  await fs.rm(`${databasePath}-shm`, { force: true });
+  await removeDatabaseFiles(databasePath);
   await fs.mkdir(path.dirname(evidencePath), { recursive: true });
   server = spawn(process.execPath, ['node_modules/tsx/dist/cli.mjs', 'server.ts'], {
     cwd: process.cwd(),
@@ -95,12 +94,7 @@ async function main(): Promise<void> {
 main().catch(error => {
   console.error(error instanceof Error ? error.message : String(error));
   process.exitCode = 1;
-}).finally(() => {
-  if (server?.pid) {
-    try {
-      process.kill(-server.pid, 'SIGTERM');
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
-    }
-  }
+}).finally(async () => {
+  await stopTestServer(server);
+  await removeDatabaseFiles(databasePath);
 });

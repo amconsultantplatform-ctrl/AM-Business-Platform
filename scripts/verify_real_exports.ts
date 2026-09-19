@@ -4,11 +4,11 @@ import path from 'node:path';
 import readXlsxFile from 'read-excel-file/node';
 import { PDFParse } from 'pdf-parse';
 import { FinancialReportingEngine } from '../src/engine/financialReportingEngine';
+import { findAvailablePort, removeDatabaseFiles, stopTestServer } from './test_server';
 
-const port = 3321;
-const baseUrl = `http://127.0.0.1:${port}`;
 const databasePath = path.resolve(process.cwd(), 'data/test_real_exports.db');
 let server: ChildProcess | undefined;
+let baseUrl: string;
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
@@ -35,9 +35,9 @@ async function waitForServer(): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  await fs.rm(databasePath, { force: true });
-  await fs.rm(`${databasePath}-wal`, { force: true });
-  await fs.rm(`${databasePath}-shm`, { force: true });
+  const port = await findAvailablePort(process.env.REAL_EXPORTS_PORT);
+  baseUrl = `http://127.0.0.1:${port}`;
+  await removeDatabaseFiles(databasePath);
   server = spawn(process.execPath, ['node_modules/tsx/dist/cli.mjs', 'server.ts'], {
     cwd: process.cwd(),
     env: {
@@ -50,7 +50,8 @@ async function main(): Promise<void> {
       INITIAL_CASHIER_PIN: '1234',
       ALLOW_DEMO_SEED_DATA: 'true'
     },
-    stdio: ['ignore', 'pipe', 'pipe']
+    stdio: ['ignore', 'pipe', 'pipe'],
+    detached: true
   });
 
   try {
@@ -103,10 +104,8 @@ async function main(): Promise<void> {
     console.log(`PASS: real PDF ${pdf.length} bytes, pages=${pageCount}, parsedPages=${parsedPdf.total}, saved=data/am-commercial-trial-balance.pdf`);
     console.log(`PASS: real XLSX ${xlsx.length} bytes, sheets=Report, rows=${rows.length}, saved=data/am-commercial-trial-balance.xlsx`);
   } finally {
-    if (server?.pid) server.kill('SIGTERM');
-    await fs.rm(databasePath, { force: true });
-    await fs.rm(`${databasePath}-wal`, { force: true });
-    await fs.rm(`${databasePath}-shm`, { force: true });
+    await stopTestServer(server);
+    await removeDatabaseFiles(databasePath);
   }
 }
 

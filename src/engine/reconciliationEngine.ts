@@ -18,6 +18,7 @@ export interface ReconciliationLine {
   opening: number | null;
   movements: number | null;
   adjustments: number | null;
+  closing: number | null;
   subledgerBalance: number | null;
   glBalance: number | null;
   difference: number | null;
@@ -115,27 +116,33 @@ function line(
   companyId: string,
   opening: number | undefined,
   movements: number | undefined,
+  adjustments: number | undefined,
   subledgerBalance: number | undefined,
   gl: number | undefined,
   source: string,
   exception?: string,
   requireMovements = true
 ): ReconciliationLine {
-  const complete = [opening, subledgerBalance, gl, ...(requireMovements ? [movements] : [])].every(value => value !== undefined);
+  const closing = opening !== undefined && movements !== undefined && adjustments !== undefined
+    ? rounded(opening + movements + adjustments)
+    : !requireMovements && opening !== undefined ? rounded(opening) : undefined;
+  const complete = [opening, closing, subledgerBalance, gl, ...(requireMovements ? [movements, adjustments] : [])].every(value => value !== undefined);
   const difference = subledgerBalance !== undefined && gl !== undefined
     ? rounded(subledgerBalance - gl)
     : null;
+  const balanced = complete && Math.abs((closing as number) - (subledgerBalance as number)) < 0.01 && Math.abs(difference || 0) < 0.01;
   return {
     module,
     period,
     companyId,
     opening: opening === undefined ? null : rounded(opening),
     movements: movements === undefined ? null : rounded(movements),
-    adjustments: null,
+    adjustments: adjustments === undefined ? null : rounded(adjustments),
+    closing: closing === undefined ? null : rounded(closing),
     subledgerBalance: subledgerBalance === undefined ? null : rounded(subledgerBalance),
     glBalance: gl === undefined ? null : rounded(gl),
     difference,
-    status: exception ? 'PENDING' : !complete ? 'PENDING' : Math.abs(difference || 0) < 0.01 ? 'COMPLETED' : 'EXCEPTION',
+    status: exception ? 'PENDING' : !complete ? 'PENDING' : balanced ? 'COMPLETED' : 'EXCEPTION',
     lastUpdated: new Date().toISOString(),
     source,
     ...(exception || !complete ? { exception: exception || 'A persisted source is missing or contains an invalid amount.' } : {})
@@ -184,7 +191,6 @@ export class ReconciliationEngine {
     const banks = periodSource(params.banks);
     const invoices = periodSource(params.invoices);
     const purchaseInvoices = periodSource(params.purchaseInvoices);
-    const eventMovements = sumField(financialEvents, ['amount', 'totalAmount']);
 
     const ar = sumField(customers, ['balance', 'outstandingBalance']);
     const ap = sumField(vendors, ['balance', 'outstandingBalance']);
@@ -199,11 +205,20 @@ export class ReconciliationEngine {
     const invoiceMovement = sumField(invoices, ['grandTotal', 'totalAmount', 'amount']);
     const purchaseMovement = sumField(purchaseInvoices, ['grandTotal', 'totalAmount', 'amount']);
 
-    const gl = (codes: string[], normalBalance: 'debit' | 'credit' = 'debit') => journalBalance(journals, codes, normalBalance);
+    const gl = (
+      module: ReconciliationModule,
+      codes: string[],
+      normalBalance: 'debit' | 'credit' = 'debit'
+    ): number | undefined => {
+      const movement = journalBalance(journals, codes, normalBalance);
+      if (movement === undefined) return undefined;
+      return rounded(movement + (openingFor(module) ?? 0));
+    };
     const moduleMovements = (module: ReconciliationModule, fallback: number | undefined): number | undefined => {
-      const moduleEvents = financialEvents.filter(event => String((event as RecordShape).module ?? (event as RecordShape).eventType ?? '').toUpperCase().includes(module));
+      const moduleEvents = financialEvents.filter(event => String((event as RecordShape).module ?? '').toUpperCase() === module);
       return moduleEvents.length ? sumField(moduleEvents, ['amount', 'totalAmount']) : fallback;
     };
+    const adjustments = 0;
     const source = (name: string, records: SourceRecord[], extra = '') =>
       `${name}${records.length ? ` (${records.length} persisted record${records.length === 1 ? '' : 's'})` : ''}${extra}`;
 
@@ -212,14 +227,14 @@ export class ReconciliationEngine {
       companyId,
       generatedAt: new Date().toISOString(),
       modules: [
-        line('AR', period, companyId, openingFor('AR'), moduleMovements('AR', invoiceMovement), ar, gl(['1020']), source('AR', customers)),
-        line('AP', period, companyId, openingFor('AP'), moduleMovements('AP', purchaseMovement), ap, gl(['2010'], 'credit'), source('AP', vendors)),
-        line('INVENTORY', period, companyId, openingFor('INVENTORY'), moduleMovements('INVENTORY', eventMovements), inventoryBalance, gl(['1030', '1200', '1250', '1300']), source('Inventory', inventory)),
-        line('ASSETS', period, companyId, openingFor('ASSETS'), moduleMovements('ASSETS', undefined), assetBalance, gl(['1510', '1520', '1530']), source('Assets', assets)),
-        line('BANK', period, companyId, openingFor('BANK'), moduleMovements('BANK', undefined), bankBalance, gl(['1010']), source('Bank', banks)),
-        line('TAX', period, companyId, openingFor('TAX'), moduleMovements('TAX', undefined), gl(['1040', '2020']), gl(['1040', '2020']), source('Tax', journals)),
-        line('PAYROLL', period, companyId, openingFor('PAYROLL'), moduleMovements('PAYROLL', payrollValue), payrollValue, gl(['2100', '2110', '2200'], 'credit'), source('Payroll', payroll)),
-        line('OPENING_BALANCES', period, companyId, openingFor('OPENING_BALANCES'), undefined, openingFor('OPENING_BALANCES'), openingFor('OPENING_BALANCES'), source('Opening balances', openingRecords), undefined, false)
+        line('AR', period, companyId, openingFor('AR'), moduleMovements('AR', invoiceMovement), adjustments, ar, gl('AR', ['1020']), source('AR', customers)),
+        line('AP', period, companyId, openingFor('AP'), moduleMovements('AP', purchaseMovement), adjustments, ap, gl('AP', ['2010'], 'credit'), source('AP', vendors)),
+        line('INVENTORY', period, companyId, openingFor('INVENTORY'), moduleMovements('INVENTORY', undefined), adjustments, inventoryBalance, gl('INVENTORY', ['1030', '1200', '1250', '1300']), source('Inventory', inventory)),
+        line('ASSETS', period, companyId, openingFor('ASSETS'), moduleMovements('ASSETS', undefined), adjustments, assetBalance, gl('ASSETS', ['1510', '1520', '1530']), source('Assets', assets)),
+        line('BANK', period, companyId, openingFor('BANK'), moduleMovements('BANK', undefined), adjustments, bankBalance, gl('BANK', ['1010']), source('Bank', banks)),
+        line('TAX', period, companyId, openingFor('TAX'), moduleMovements('TAX', undefined), adjustments, gl('TAX', ['1040', '2020']), gl('TAX', ['1040', '2020']), source('Tax', journals)),
+        line('PAYROLL', period, companyId, openingFor('PAYROLL'), moduleMovements('PAYROLL', payrollValue), adjustments, payrollValue, gl('PAYROLL', ['2100', '2110', '2200'], 'credit'), source('Payroll', payroll)),
+        line('OPENING_BALANCES', period, companyId, openingFor('OPENING_BALANCES'), undefined, undefined, openingFor('OPENING_BALANCES'), openingFor('OPENING_BALANCES'), source('Opening balances', openingRecords), undefined, false)
       ]
     };
   }
